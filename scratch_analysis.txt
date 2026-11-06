@@ -1,0 +1,2487 @@
+
+================================================================================
+NOTEBOOK: 01_Pegasus_PubMed.ipynb
+================================================================================
+
+--- CELL 0 (markdown) ---
+# 🔬 Model Pipeline: Google Pegasus-PubMed (Seq2Seq Baseline)
+### **Jadavpur University Research Internship | Under: Prof. Tohida Rehman**
+**Track:** FIRE MixSub-SciHigh Scientific Highlight Summarization
+**Model ID:** `google/pegasus-pubmed`
+**Architecture:** SEQ2SEQ (LoRA/FP16)
+
+---
+### 🎯 Strict Uniform Benchmark Constraints (Scientifically Fair)
+- **`MAX_SOURCE_LENGTH = 512` tokens**: Uniform input length across all 6 models.
+- **`MAX_TARGET_LENGTH = 128` tokens**: Uniform output generation limit across all 6 models.
+
+### 📊 The 3 Non-Redundant Benchmark Pillars Measured:
+1. **Overall Quality**: ROUGE-L F1 (↑ Higher is Better) & Target F1 Score (↑)
+2. **Hallucination Risk**: Ungrounded Token % (↓ Lower is Better) & Precision Source (% grounded in abstract)
+3. **Inference Time**: Wall-Clock Latency per Sample (↓ Lower is Faster) & Throughput (tok/s ↑)
+
+--- CELL 1 (code) ---
+# Step 1: Mount Google Drive for Persistent Checkpoint Resuming
+from google.colab import drive
+import os
+
+drive.mount('/content/drive')
+
+DRIVE_BASE_DIR = '/content/drive/MyDrive/JU_Benchmark_Project'
+MODEL_CHECKPOINT_DIR = os.path.join(DRIVE_BASE_DIR, 'checkpoints', 'pegasus-pubmed')
+RESULTS_DIR = os.path.join(DRIVE_BASE_DIR, 'results')
+DATASET_DIR = os.path.join(DRIVE_BASE_DIR, 'Dataset')
+
+os.makedirs(MODEL_CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(DATASET_DIR, exist_ok=True)
+
+# Uniform Token Limits Across All Models
+MAX_SOURCE_LENGTH = 512
+MAX_TARGET_LENGTH = 128
+
+print('✅ Drive mounted!')
+print('📁 Checkpoint directory:', MODEL_CHECKPOINT_DIR)
+print('📁 Results directory:   ', RESULTS_DIR)
+print(f'📏 Uniform Token Limits: Input={MAX_SOURCE_LENGTH} | Output={MAX_TARGET_LENGTH}')
+
+
+--- CELL 2 (code) ---
+# Step 2: Install Libraries
+!pip install -q --upgrade pip
+!pip install -q --upgrade "torchao>=0.16.0"
+!pip install -q transformers peft bitsandbytes datasets accelerate evaluate rouge-score tabulate
+
+import torch
+print('CUDA Available:', torch.cuda.is_available())
+if torch.cuda.is_available():
+    print('GPU Device:', torch.cuda.get_device_name(0))
+    print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+
+
+--- CELL 3 (code) ---
+# Step 3: Verify Dataset Files
+import pandas as pd
+
+TRAIN_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_train_FIRE.csv')
+VAL_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_val_FIRE.csv')
+TEST_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_test_FIRE(Masked).csv')
+
+for p, name in [(TRAIN_CSV, 'Train'), (VAL_CSV, 'Val'), (TEST_CSV, 'Test')]:
+    if os.path.exists(p):
+        df = pd.read_csv(p)
+        print(f'✅ {name} set ready: {len(df):,} rows')
+    else:
+        print(f'⚠️ Warning: {p} not found in Drive. Please upload to {DATASET_DIR}')
+
+
+--- CELL 4 (code) ---
+# Step 4: Core Metric Calculations (3 Pillars: Quality, Hallucination Risk, Latency)
+import re
+from collections import Counter
+import numpy as np
+from rouge_score import rouge_scorer
+
+def clean_tokenize(text):
+    if not isinstance(text, str):
+        return []
+    return re.findall(r'\b[a-zA-Z0-9]+(?:\'[a-zA-Z0-9]+)?\b', text.lower())
+
+def get_ngrams(tokens, n=1):
+    if len(tokens) < n or n < 1:
+        return []
+    return [tuple(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+
+def compute_pillars_for_sample(gen_text, src_text, tgt_text):
+    gen_tokens = clean_tokenize(gen_text)
+    src_tokens = clean_tokenize(src_text)
+    tgt_tokens = clean_tokenize(tgt_text)
+
+    gen_counts = Counter(get_ngrams(gen_tokens, 1))
+    src_counts = Counter(get_ngrams(src_tokens, 1))
+    tgt_counts = Counter(get_ngrams(tgt_tokens, 1))
+
+    total_gen = sum(gen_counts.values())
+    total_tgt = sum(tgt_counts.values())
+
+    # Pillar 2: Factuality / Hallucination Risk (Tokens ungrounded in Source Abstract)
+    overlap_src = sum((gen_counts & src_counts).values())
+    precision_src = (overlap_src / total_gen) if total_gen > 0 else 0.0
+    hallucination_risk = 1.0 - precision_src # Ungrounded fraction (Lower is Better)
+
+    # Pillar 1: Target Highlight Alignment
+    overlap_tgt = sum((gen_counts & tgt_counts).values())
+    precision_tgt = (overlap_tgt / total_gen) if total_gen > 0 else 0.0
+    recall_tgt = (overlap_tgt / total_tgt) if total_tgt > 0 else 0.0
+    f1_tgt = (2 * precision_tgt * recall_tgt / (precision_tgt + recall_tgt)) if (precision_tgt + recall_tgt) > 0 else 0.0
+
+    return {
+        'hallucination_risk': hallucination_risk,
+        'precision_src': precision_src,
+        'precision_tgt': precision_tgt,
+        'recall_tgt': recall_tgt,
+        'f1_tgt': f1_tgt
+    }
+
+def evaluate_core_benchmarks(predictions, sources, references, latencies=None, generated_tokens=None):
+    scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rl_f1_list, rl_p_list, rl_r_list = [], [], []
+
+    for pred, ref in zip(predictions, references):
+        score = scorer.score(ref, pred)
+        rl_f1_list.append(score['rougeL'].fmeasure)
+        rl_p_list.append(score['rougeL'].precision)
+        rl_r_list.append(score['rougeL'].recall)
+
+    sample_metrics = [compute_pillars_for_sample(p, s, r) for p, s, r in zip(predictions, sources, references)]
+
+    results = {
+        # Pillar 1: Overall Quality (↑ Higher is Better)
+        'overall_quality_rougeL_f1': float(np.mean(rl_f1_list)),
+        'rougeL_precision': float(np.mean(rl_p_list)),
+        'rougeL_recall': float(np.mean(rl_r_list)),
+        'f1_score_target': float(np.mean([x['f1_tgt'] for x in sample_metrics])),
+        'precision_target': float(np.mean([x['precision_tgt'] for x in sample_metrics])),
+        'recall_target': float(np.mean([x['recall_tgt'] for x in sample_metrics])),
+
+        # Pillar 2: Hallucination Risk (↓ Lower is Better)
+        'hallucination_risk_pct': float(np.mean([x['hallucination_risk'] for x in sample_metrics])),
+        'source_grounding_precision': float(np.mean([x['precision_src'] for x in sample_metrics])),
+    }
+
+    # Pillar 3: Inference Time & Speed
+    if latencies is not None and len(latencies) > 0:
+        results['wall_clock_latency_sec'] = float(np.mean(latencies)) # ↓ Lower is Better
+        results['total_wall_clock_sec'] = float(np.sum(latencies))
+
+    if generated_tokens is not None and latencies is not None and len(latencies) > 0:
+        tokens_per_sec = [t / max(l, 1e-4) for t, l in zip(generated_tokens, latencies)]
+        results['throughput_tokens_per_sec'] = float(np.mean(tokens_per_sec)) # ↑ Higher is Better
+
+    return results
+
+print('✅ 3-Pillar Benchmark Engine Loaded!')
+
+
+--- CELL 5 (code) ---
+# Step 5: Train & Optimize Google Pegasus-PubMed (Seq2Seq Baseline)
+HF_TOKEN = '' # HuggingFace Token for gated models
+NUM_EPOCHS = 3
+BATCH_SIZE = 4
+GRAD_ACCUM = 4
+SAVE_STEPS = 100
+
+import gc
+from datasets import Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    Trainer,
+    TrainingArguments,
+    DataCollatorForSeq2Seq,
+    DataCollatorForLanguageModeling,
+    BitsAndBytesConfig
+)
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+
+compute_dtype = torch.float16 if not torch.cuda.is_bf16_supported() else torch.bfloat16
+device_map = {'': 0} if torch.cuda.is_available() else None
+
+train_df = pd.read_csv(TRAIN_CSV).dropna(subset=['Abstract', 'Highlights'])
+val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+
+tokenizer = AutoTokenizer.from_pretrained('google/pegasus-pubmed', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = 'right'
+
+# Preprocess with Strict Token Limits
+def prep(batch):
+    inputs = ['summarize: ' + d for d in batch['Abstract']]
+    m = tokenizer(inputs, max_length=MAX_SOURCE_LENGTH, truncation=True)
+    lbl = tokenizer(text_target=batch['Highlights'], max_length=MAX_TARGET_LENGTH, truncation=True)
+    m['labels'] = lbl['input_ids']
+    return m
+raw_train_ds = Dataset.from_pandas(train_df, preserve_index=False)
+train_ds = raw_train_ds.map(prep, batched=True, remove_columns=raw_train_ds.column_names)
+raw_val_ds = Dataset.from_pandas(val_df, preserve_index=False)
+val_ds = raw_val_ds.map(prep, batched=True, remove_columns=raw_val_ds.column_names)
+
+model = AutoModelForSeq2SeqLM.from_pretrained('google/pegasus-pubmed', torch_dtype=compute_dtype, device_map=device_map, token=HF_TOKEN or None)
+peft_config = LoraConfig(
+    task_type=TaskType.SEQ_2_SEQ_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=['q_proj', 'v_proj'],
+    bias='none'
+)
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+
+training_args = Seq2SeqTrainingArguments(
+    output_dir=MODEL_CHECKPOINT_DIR,
+    per_device_train_batch_size=BATCH_SIZE,
+    gradient_accumulation_steps=GRAD_ACCUM,
+    learning_rate=2e-4,
+    num_train_epochs=NUM_EPOCHS,
+    logging_steps=10,
+    save_strategy='steps',
+    save_steps=SAVE_STEPS,
+    save_total_limit=2,
+    fp16=True if not torch.cuda.is_bf16_supported() else False,
+    bf16=True if torch.cuda.is_bf16_supported() else False,
+    report_to='none'
+)
+data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
+trainer = Seq2SeqTrainer(model=model, args=training_args, train_dataset=train_ds, eval_dataset=val_ds, tokenizer=tokenizer, data_collator=data_collator)
+# Checkpoint Resuming Check
+resume_ckpt = None
+if os.path.exists(MODEL_CHECKPOINT_DIR):
+    ckpts = [os.path.join(MODEL_CHECKPOINT_DIR, d) for d in os.listdir(MODEL_CHECKPOINT_DIR) if d.startswith('checkpoint-') and os.path.isdir(os.path.join(MODEL_CHECKPOINT_DIR, d))]
+    if ckpts:
+        ckpts.sort(key=lambda x: int(x.split('-')[-1]))
+        resume_ckpt = ckpts[-1]
+        print('--> 🔄 Found previous checkpoint on Google Drive! Resuming from:', resume_ckpt)
+
+print('Starting training...')
+trainer.train(resume_from_checkpoint=resume_ckpt)
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+trainer.save_model(final_adapter)
+tokenizer.save_pretrained(final_adapter)
+print('✅ Fine-tuned adapter saved to Drive:', final_adapter)
+
+del model, trainer
+torch.cuda.empty_cache()
+gc.collect()
+
+
+--- CELL 6 (code) ---
+# Step 6: Benchmarking & Test Predictions for Google Pegasus-PubMed (Seq2Seq Baseline)
+MAX_EVAL_SAMPLES = 100 # Validation samples to evaluate
+
+import time
+import json
+from peft import PeftModel
+
+eval_val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+if MAX_EVAL_SAMPLES and len(eval_val_df) > MAX_EVAL_SAMPLES:
+    eval_val_df = eval_val_df.iloc[:MAX_EVAL_SAMPLES]
+
+test_df = pd.read_csv(TEST_CSV)
+test_df['Abstract'] = test_df['Abstract'].fillna('')
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+tokenizer = AutoTokenizer.from_pretrained(final_adapter if os.path.exists(final_adapter) else 'google/pegasus-pubmed', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+base_m = AutoModelForSeq2SeqLM.from_pretrained('google/pegasus-pubmed', torch_dtype=compute_dtype, device_map=device_map, token=HF_TOKEN or None)
+if os.path.exists(final_adapter):
+    print('--> Loading fine-tuned adapter weights from Drive...')
+    eval_model = PeftModel.from_pretrained(base_m, final_adapter)
+else:
+    print('--> No fine-tuned adapter found, evaluating base model...')
+    eval_model = base_m
+
+eval_model.eval()
+
+# GPU Warmup
+with torch.no_grad():
+    w_in = tokenizer('summarize: ' + abs_text, return_tensors='pt').to(eval_model.device)
+    _ = eval_model.generate(**w_in, max_new_tokens=10)
+
+predictions, latencies, token_counts = [], [], []
+sources = eval_val_df['Abstract'].tolist()
+references = eval_val_df['Highlights'].tolist()
+
+print(f'Benchmarking {len(eval_val_df)} validation samples (Uniform Input={MAX_SOURCE_LENGTH}, Output={MAX_TARGET_LENGTH})...')
+for i, abs_text in enumerate(sources):
+    prompt = 'summarize: ' + abs_text
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        out = eval_model.generate(
+            **in_t,
+            max_new_tokens=MAX_TARGET_LENGTH,
+            do_sample=False,
+            repetition_penalty=1.1,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    elapsed = time.perf_counter() - t0
+    latencies.append(elapsed)
+
+    toks = out[0]
+    pred_text = tokenizer.decode(toks, skip_special_tokens=True).strip()
+    n_toks = len(toks)
+    predictions.append(pred_text)
+    token_counts.append(n_toks)
+    if (i + 1) % 25 == 0 or (i + 1) == len(eval_val_df):
+        print(f'  Sample {i+1}/{len(eval_val_df)} | Latency: {elapsed:.2f}s ({n_toks} tokens)')
+
+# Compute 3-Pillar Benchmarks
+bench_res = evaluate_core_benchmarks(predictions, sources, references, latencies, token_counts)
+bench_res['model'] = 'pegasus-pubmed'
+bench_res['model_id'] = 'google/pegasus-pubmed'
+bench_res['max_source_length'] = MAX_SOURCE_LENGTH
+bench_res['max_target_length'] = MAX_TARGET_LENGTH
+
+res_file = os.path.join(RESULTS_DIR, 'benchmark_pegasus-pubmed.json')
+with open(res_file, 'w') as f:
+    json.dump(bench_res, f, indent=4)
+print('✅ 3-Pillar Benchmark saved to:', res_file)
+
+# Generate Masked Test Predictions
+print(f'Generating test highlights for {len(test_df)} masked samples...')
+test_preds = []
+for idx, abs_text in enumerate(test_df['Abstract']):
+    prompt = 'summarize: ' + abs_text
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+    with torch.no_grad():
+        out = eval_model.generate(**in_t, max_new_tokens=MAX_TARGET_LENGTH, do_sample=False, pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id)
+    pred_str = tokenizer.decode(out[0], skip_special_tokens=True).strip()
+    test_preds.append(pred_str)
+    if (idx + 1) % 100 == 0 or (idx + 1) == len(test_df):
+        print(f'  Test progress: {idx+1}/{len(test_df)}')
+
+test_sub_df = test_df.copy()
+test_sub_df['Highlights'] = test_preds
+test_sub_csv = os.path.join(RESULTS_DIR, 'MixSub-SciHigh_test_predictions_pegasus-pubmed.csv')
+test_sub_df.to_csv(test_sub_csv, index=False)
+print('✅ Masked test predictions saved to:', test_sub_csv)
+
+del eval_model, base_m
+torch.cuda.empty_cache()
+gc.collect()
+
+
+================================================================================
+NOTEBOOK: 02_Gemma_2_2B.ipynb
+================================================================================
+
+--- CELL 0 (markdown) ---
+# 🔬 Model Pipeline: Google Gemma-2-2B-IT (4-bit QLoRA)
+### **Jadavpur University Research Internship | Under: Prof. Tohida Rehman**
+**Track:** FIRE MixSub-SciHigh Scientific Highlight Summarization
+**Model ID:** `google/gemma-2-2b-it`
+**Architecture:** CAUSAL (4-bit QLoRA)
+
+---
+### 🎯 Strict Uniform Benchmark Constraints (Scientifically Fair)
+- **`MAX_SOURCE_LENGTH = 512` tokens**: Uniform input length across all 6 models.
+- **`MAX_TARGET_LENGTH = 128` tokens**: Uniform output generation limit across all 6 models.
+
+### 📊 The 3 Non-Redundant Benchmark Pillars Measured:
+1. **Overall Quality**: ROUGE-L F1 (↑ Higher is Better) & Target F1 Score (↑)
+2. **Hallucination Risk**: Ungrounded Token % (↓ Lower is Better) & Precision Source (% grounded in abstract)
+3. **Inference Time**: Wall-Clock Latency per Sample (↓ Lower is Faster) & Throughput (tok/s ↑)
+
+--- CELL 1 (code) ---
+# Step 1: Mount Google Drive for Persistent Checkpoint Resuming
+from google.colab import drive
+import os
+
+drive.mount('/content/drive')
+
+DRIVE_BASE_DIR = '/content/drive/MyDrive/JU_Benchmark_Project'
+MODEL_CHECKPOINT_DIR = os.path.join(DRIVE_BASE_DIR, 'checkpoints', 'gemma-2-2b')
+RESULTS_DIR = os.path.join(DRIVE_BASE_DIR, 'results')
+DATASET_DIR = os.path.join(DRIVE_BASE_DIR, 'Dataset')
+
+os.makedirs(MODEL_CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(DATASET_DIR, exist_ok=True)
+
+# Uniform Token Limits Across All Models
+MAX_SOURCE_LENGTH = 512
+MAX_TARGET_LENGTH = 128
+
+print('✅ Drive mounted!')
+print('📁 Checkpoint directory:', MODEL_CHECKPOINT_DIR)
+print('📁 Results directory:   ', RESULTS_DIR)
+print(f'📏 Uniform Token Limits: Input={MAX_SOURCE_LENGTH} | Output={MAX_TARGET_LENGTH}')
+
+
+--- CELL 2 (code) ---
+# Step 2: Install Libraries
+!pip install -q --upgrade pip
+!pip install -q --upgrade "torchao>=0.16.0"
+!pip install -q transformers peft bitsandbytes datasets accelerate evaluate rouge-score tabulate
+
+import torch
+print('CUDA Available:', torch.cuda.is_available())
+if torch.cuda.is_available():
+    print('GPU Device:', torch.cuda.get_device_name(0))
+    print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+
+
+--- CELL 3 (code) ---
+# Step 3: Verify Dataset Files
+import pandas as pd
+
+TRAIN_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_train_FIRE.csv')
+VAL_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_val_FIRE.csv')
+TEST_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_test_FIRE(Masked).csv')
+
+for p, name in [(TRAIN_CSV, 'Train'), (VAL_CSV, 'Val'), (TEST_CSV, 'Test')]:
+    if os.path.exists(p):
+        df = pd.read_csv(p)
+        print(f'✅ {name} set ready: {len(df):,} rows')
+    else:
+        print(f'⚠️ Warning: {p} not found in Drive. Please upload to {DATASET_DIR}')
+
+
+--- CELL 4 (code) ---
+# Step 4: Core Metric Calculations (3 Pillars: Quality, Hallucination Risk, Latency)
+import re
+from collections import Counter
+import numpy as np
+from rouge_score import rouge_scorer
+
+def clean_tokenize(text):
+    if not isinstance(text, str):
+        return []
+    return re.findall(r'\b[a-zA-Z0-9]+(?:\'[a-zA-Z0-9]+)?\b', text.lower())
+
+def get_ngrams(tokens, n=1):
+    if len(tokens) < n or n < 1:
+        return []
+    return [tuple(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+
+def compute_pillars_for_sample(gen_text, src_text, tgt_text):
+    gen_tokens = clean_tokenize(gen_text)
+    src_tokens = clean_tokenize(src_text)
+    tgt_tokens = clean_tokenize(tgt_text)
+
+    gen_counts = Counter(get_ngrams(gen_tokens, 1))
+    src_counts = Counter(get_ngrams(src_tokens, 1))
+    tgt_counts = Counter(get_ngrams(tgt_tokens, 1))
+
+    total_gen = sum(gen_counts.values())
+    total_tgt = sum(tgt_counts.values())
+
+    # Pillar 2: Factuality / Hallucination Risk (Tokens ungrounded in Source Abstract)
+    overlap_src = sum((gen_counts & src_counts).values())
+    precision_src = (overlap_src / total_gen) if total_gen > 0 else 0.0
+    hallucination_risk = 1.0 - precision_src # Ungrounded fraction (Lower is Better)
+
+    # Pillar 1: Target Highlight Alignment
+    overlap_tgt = sum((gen_counts & tgt_counts).values())
+    precision_tgt = (overlap_tgt / total_gen) if total_gen > 0 else 0.0
+    recall_tgt = (overlap_tgt / total_tgt) if total_tgt > 0 else 0.0
+    f1_tgt = (2 * precision_tgt * recall_tgt / (precision_tgt + recall_tgt)) if (precision_tgt + recall_tgt) > 0 else 0.0
+
+    return {
+        'hallucination_risk': hallucination_risk,
+        'precision_src': precision_src,
+        'precision_tgt': precision_tgt,
+        'recall_tgt': recall_tgt,
+        'f1_tgt': f1_tgt
+    }
+
+def evaluate_core_benchmarks(predictions, sources, references, latencies=None, generated_tokens=None):
+    scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rl_f1_list, rl_p_list, rl_r_list = [], [], []
+
+    for pred, ref in zip(predictions, references):
+        score = scorer.score(ref, pred)
+        rl_f1_list.append(score['rougeL'].fmeasure)
+        rl_p_list.append(score['rougeL'].precision)
+        rl_r_list.append(score['rougeL'].recall)
+
+    sample_metrics = [compute_pillars_for_sample(p, s, r) for p, s, r in zip(predictions, sources, references)]
+
+    results = {
+        # Pillar 1: Overall Quality (↑ Higher is Better)
+        'overall_quality_rougeL_f1': float(np.mean(rl_f1_list)),
+        'rougeL_precision': float(np.mean(rl_p_list)),
+        'rougeL_recall': float(np.mean(rl_r_list)),
+        'f1_score_target': float(np.mean([x['f1_tgt'] for x in sample_metrics])),
+        'precision_target': float(np.mean([x['precision_tgt'] for x in sample_metrics])),
+        'recall_target': float(np.mean([x['recall_tgt'] for x in sample_metrics])),
+
+        # Pillar 2: Hallucination Risk (↓ Lower is Better)
+        'hallucination_risk_pct': float(np.mean([x['hallucination_risk'] for x in sample_metrics])),
+        'source_grounding_precision': float(np.mean([x['precision_src'] for x in sample_metrics])),
+    }
+
+    # Pillar 3: Inference Time & Speed
+    if latencies is not None and len(latencies) > 0:
+        results['wall_clock_latency_sec'] = float(np.mean(latencies)) # ↓ Lower is Better
+        results['total_wall_clock_sec'] = float(np.sum(latencies))
+
+    if generated_tokens is not None and latencies is not None and len(latencies) > 0:
+        tokens_per_sec = [t / max(l, 1e-4) for t, l in zip(generated_tokens, latencies)]
+        results['throughput_tokens_per_sec'] = float(np.mean(tokens_per_sec)) # ↑ Higher is Better
+
+    return results
+
+print('✅ 3-Pillar Benchmark Engine Loaded!')
+
+
+--- CELL 5 (code) ---
+# Step 5: Train & Optimize Google Gemma-2-2B-IT (4-bit QLoRA)
+HF_TOKEN = '' # HuggingFace Token for gated models
+NUM_EPOCHS = 3
+BATCH_SIZE = 4
+GRAD_ACCUM = 4
+SAVE_STEPS = 100
+
+import gc
+from datasets import Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    Trainer,
+    TrainingArguments,
+    DataCollatorForSeq2Seq,
+    DataCollatorForLanguageModeling,
+    BitsAndBytesConfig
+)
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+
+compute_dtype = torch.float16 if not torch.cuda.is_bf16_supported() else torch.bfloat16
+device_map = {'': 0} if torch.cuda.is_available() else None
+
+train_df = pd.read_csv(TRAIN_CSV).dropna(subset=['Abstract', 'Highlights'])
+val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+
+tokenizer = AutoTokenizer.from_pretrained('google/gemma-2-2b-it', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = 'right'
+
+# Preprocess with Strict Token Limits
+def prep(batch):
+    texts = [f'<start_of_turn>user\nGenerate concise scientific research highlights for this abstract:\n{a.strip()}<end_of_turn>\n<start_of_turn>model\n{h.strip()}<end_of_turn>' for a, h in zip(batch['Abstract'], batch['Highlights'])]
+    tok = tokenizer(texts, max_length=MAX_SOURCE_LENGTH + MAX_TARGET_LENGTH, truncation=True)
+    tok['labels'] = tok['input_ids'].copy()
+    return tok
+raw_train_ds = Dataset.from_pandas(train_df, preserve_index=False)
+train_ds = raw_train_ds.map(prep, batched=True, remove_columns=raw_train_ds.column_names)
+raw_val_ds = Dataset.from_pandas(val_df, preserve_index=False)
+val_ds = raw_val_ds.map(prep, batched=True, remove_columns=raw_val_ds.column_names)
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type='nf4',
+    bnb_4bit_compute_dtype=compute_dtype,
+    bnb_4bit_use_double_quant=True
+)
+model = AutoModelForCausalLM.from_pretrained(
+    'google/gemma-2-2b-it',
+    quantization_config=bnb_config,
+    device_map=device_map,
+    torch_dtype=compute_dtype,
+    trust_remote_code=True,
+    token=HF_TOKEN or None
+)
+model = prepare_model_for_kbit_training(model)
+peft_config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'],
+    bias='none'
+)
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+
+training_args = TrainingArguments(
+    output_dir=MODEL_CHECKPOINT_DIR,
+    per_device_train_batch_size=BATCH_SIZE,
+    gradient_accumulation_steps=GRAD_ACCUM,
+    learning_rate=2e-4,
+    num_train_epochs=NUM_EPOCHS,
+    logging_steps=10,
+    save_strategy='steps',
+    save_steps=SAVE_STEPS,
+    save_total_limit=2,
+    fp16=True if not torch.cuda.is_bf16_supported() else False,
+    bf16=True if torch.cuda.is_bf16_supported() else False,
+    optim='paged_adamw_8bit' if True else 'adamw_torch',
+    report_to='none'
+)
+data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+trainer = Trainer(model=model, args=training_args, train_dataset=train_ds, eval_dataset=val_ds, tokenizer=tokenizer, data_collator=data_collator)
+# Checkpoint Resuming Check
+resume_ckpt = None
+if os.path.exists(MODEL_CHECKPOINT_DIR):
+    ckpts = [os.path.join(MODEL_CHECKPOINT_DIR, d) for d in os.listdir(MODEL_CHECKPOINT_DIR) if d.startswith('checkpoint-') and os.path.isdir(os.path.join(MODEL_CHECKPOINT_DIR, d))]
+    if ckpts:
+        ckpts.sort(key=lambda x: int(x.split('-')[-1]))
+        resume_ckpt = ckpts[-1]
+        print('--> 🔄 Found previous checkpoint on Google Drive! Resuming from:', resume_ckpt)
+
+print('Starting training...')
+trainer.train(resume_from_checkpoint=resume_ckpt)
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+trainer.save_model(final_adapter)
+tokenizer.save_pretrained(final_adapter)
+print('✅ Fine-tuned adapter saved to Drive:', final_adapter)
+
+del model, trainer
+torch.cuda.empty_cache()
+gc.collect()
+
+
+--- CELL 6 (code) ---
+# Step 6: Benchmarking & Test Predictions for Google Gemma-2-2B-IT (4-bit QLoRA)
+MAX_EVAL_SAMPLES = 100 # Validation samples to evaluate
+
+import time
+import json
+from peft import PeftModel
+
+eval_val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+if MAX_EVAL_SAMPLES and len(eval_val_df) > MAX_EVAL_SAMPLES:
+    eval_val_df = eval_val_df.iloc[:MAX_EVAL_SAMPLES]
+
+test_df = pd.read_csv(TEST_CSV)
+test_df['Abstract'] = test_df['Abstract'].fillna('')
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+tokenizer = AutoTokenizer.from_pretrained(final_adapter if os.path.exists(final_adapter) else 'google/gemma-2-2b-it', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+base_m = AutoModelForCausalLM.from_pretrained(
+    'google/gemma-2-2b-it',
+    quantization_config=BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_compute_dtype=compute_dtype),
+    device_map=device_map,
+    torch_dtype=compute_dtype,
+    token=HF_TOKEN or None,
+    trust_remote_code=True
+)
+if os.path.exists(final_adapter):
+    print('--> Loading fine-tuned adapter weights from Drive...')
+    eval_model = PeftModel.from_pretrained(base_m, final_adapter)
+else:
+    print('--> No fine-tuned adapter found, evaluating base model...')
+    eval_model = base_m
+
+eval_model.eval()
+
+# GPU Warmup
+with torch.no_grad():
+    w_in = tokenizer(f'<start_of_turn>user\nGenerate concise scientific research highlights for this abstract:\n{"warmup"}<end_of_turn>\n<start_of_turn>model\n', return_tensors='pt').to(eval_model.device)
+    _ = eval_model.generate(**w_in, max_new_tokens=10)
+
+predictions, latencies, token_counts = [], [], []
+sources = eval_val_df['Abstract'].tolist()
+references = eval_val_df['Highlights'].tolist()
+
+print(f'Benchmarking {len(eval_val_df)} validation samples (Uniform Input={MAX_SOURCE_LENGTH}, Output={MAX_TARGET_LENGTH})...')
+for i, abs_text in enumerate(sources):
+    prompt = f'<start_of_turn>user\nGenerate concise scientific research highlights for this abstract:\n{abs_text.strip()}<end_of_turn>\n<start_of_turn>model\n'
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        out = eval_model.generate(
+            **in_t,
+            max_new_tokens=MAX_TARGET_LENGTH,
+            do_sample=False,
+            repetition_penalty=1.1,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    elapsed = time.perf_counter() - t0
+    latencies.append(elapsed)
+
+    new_toks = out[0][p_len:]
+    pred_text = tokenizer.decode(new_toks, skip_special_tokens=True).strip()
+    n_toks = len(new_toks)
+    predictions.append(pred_text)
+    token_counts.append(n_toks)
+    if (i + 1) % 25 == 0 or (i + 1) == len(eval_val_df):
+        print(f'  Sample {i+1}/{len(eval_val_df)} | Latency: {elapsed:.2f}s ({n_toks} tokens)')
+
+# Compute 3-Pillar Benchmarks
+bench_res = evaluate_core_benchmarks(predictions, sources, references, latencies, token_counts)
+bench_res['model'] = 'gemma-2-2b'
+bench_res['model_id'] = 'google/gemma-2-2b-it'
+bench_res['max_source_length'] = MAX_SOURCE_LENGTH
+bench_res['max_target_length'] = MAX_TARGET_LENGTH
+
+res_file = os.path.join(RESULTS_DIR, 'benchmark_gemma-2-2b.json')
+with open(res_file, 'w') as f:
+    json.dump(bench_res, f, indent=4)
+print('✅ 3-Pillar Benchmark saved to:', res_file)
+
+# Generate Masked Test Predictions
+print(f'Generating test highlights for {len(test_df)} masked samples...')
+test_preds = []
+for idx, abs_text in enumerate(test_df['Abstract']):
+    prompt = f'<start_of_turn>user\nGenerate concise scientific research highlights for this abstract:\n{abs_text.strip()}<end_of_turn>\n<start_of_turn>model\n'
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+    with torch.no_grad():
+        out = eval_model.generate(**in_t, max_new_tokens=MAX_TARGET_LENGTH, do_sample=False, pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id)
+    pred_str = tokenizer.decode(out[0][p_len:], skip_special_tokens=True).strip()
+    test_preds.append(pred_str)
+    if (idx + 1) % 100 == 0 or (idx + 1) == len(test_df):
+        print(f'  Test progress: {idx+1}/{len(test_df)}')
+
+test_sub_df = test_df.copy()
+test_sub_df['Highlights'] = test_preds
+test_sub_csv = os.path.join(RESULTS_DIR, 'MixSub-SciHigh_test_predictions_gemma-2-2b.csv')
+test_sub_df.to_csv(test_sub_csv, index=False)
+print('✅ Masked test predictions saved to:', test_sub_csv)
+
+del eval_model, base_m
+torch.cuda.empty_cache()
+gc.collect()
+
+
+================================================================================
+NOTEBOOK: 03_Phi_3_Mini.ipynb
+================================================================================
+
+--- CELL 0 (markdown) ---
+# 🔬 Model Pipeline: Microsoft Phi-3-Mini-4K-Instruct (4-bit QLoRA)
+### **Jadavpur University Research Internship | Under: Prof. Tohida Rehman**
+**Track:** FIRE MixSub-SciHigh Scientific Highlight Summarization
+**Model ID:** `microsoft/Phi-3-mini-4k-instruct`
+**Architecture:** CAUSAL (4-bit QLoRA)
+
+---
+### 🎯 Strict Uniform Benchmark Constraints (Scientifically Fair)
+- **`MAX_SOURCE_LENGTH = 512` tokens**: Uniform input length across all 6 models.
+- **`MAX_TARGET_LENGTH = 128` tokens**: Uniform output generation limit across all 6 models.
+
+### 📊 The 3 Non-Redundant Benchmark Pillars Measured:
+1. **Overall Quality**: ROUGE-L F1 (↑ Higher is Better) & Target F1 Score (↑)
+2. **Hallucination Risk**: Ungrounded Token % (↓ Lower is Better) & Precision Source (% grounded in abstract)
+3. **Inference Time**: Wall-Clock Latency per Sample (↓ Lower is Faster) & Throughput (tok/s ↑)
+
+--- CELL 1 (code) ---
+# Step 1: Mount Google Drive for Persistent Checkpoint Resuming
+from google.colab import drive
+import os
+
+drive.mount('/content/drive')
+
+DRIVE_BASE_DIR = '/content/drive/MyDrive/JU_Benchmark_Project'
+MODEL_CHECKPOINT_DIR = os.path.join(DRIVE_BASE_DIR, 'checkpoints', 'phi-3-mini')
+RESULTS_DIR = os.path.join(DRIVE_BASE_DIR, 'results')
+DATASET_DIR = os.path.join(DRIVE_BASE_DIR, 'Dataset')
+
+os.makedirs(MODEL_CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(DATASET_DIR, exist_ok=True)
+
+# Uniform Token Limits Across All Models
+MAX_SOURCE_LENGTH = 512
+MAX_TARGET_LENGTH = 128
+
+print('✅ Drive mounted!')
+print('📁 Checkpoint directory:', MODEL_CHECKPOINT_DIR)
+print('📁 Results directory:   ', RESULTS_DIR)
+print(f'📏 Uniform Token Limits: Input={MAX_SOURCE_LENGTH} | Output={MAX_TARGET_LENGTH}')
+
+
+--- CELL 2 (code) ---
+# Step 2: Install Libraries
+!pip install -q --upgrade pip
+!pip install -q --upgrade "torchao>=0.16.0"
+!pip install -q transformers peft bitsandbytes datasets accelerate evaluate rouge-score tabulate
+
+import torch
+print('CUDA Available:', torch.cuda.is_available())
+if torch.cuda.is_available():
+    print('GPU Device:', torch.cuda.get_device_name(0))
+    print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+
+
+--- CELL 3 (code) ---
+# Step 3: Verify Dataset Files
+import pandas as pd
+
+TRAIN_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_train_FIRE.csv')
+VAL_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_val_FIRE.csv')
+TEST_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_test_FIRE(Masked).csv')
+
+for p, name in [(TRAIN_CSV, 'Train'), (VAL_CSV, 'Val'), (TEST_CSV, 'Test')]:
+    if os.path.exists(p):
+        df = pd.read_csv(p)
+        print(f'✅ {name} set ready: {len(df):,} rows')
+    else:
+        print(f'⚠️ Warning: {p} not found in Drive. Please upload to {DATASET_DIR}')
+
+
+--- CELL 4 (code) ---
+# Step 4: Core Metric Calculations (3 Pillars: Quality, Hallucination Risk, Latency)
+import re
+from collections import Counter
+import numpy as np
+from rouge_score import rouge_scorer
+
+def clean_tokenize(text):
+    if not isinstance(text, str):
+        return []
+    return re.findall(r'\b[a-zA-Z0-9]+(?:\'[a-zA-Z0-9]+)?\b', text.lower())
+
+def get_ngrams(tokens, n=1):
+    if len(tokens) < n or n < 1:
+        return []
+    return [tuple(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+
+def compute_pillars_for_sample(gen_text, src_text, tgt_text):
+    gen_tokens = clean_tokenize(gen_text)
+    src_tokens = clean_tokenize(src_text)
+    tgt_tokens = clean_tokenize(tgt_text)
+
+    gen_counts = Counter(get_ngrams(gen_tokens, 1))
+    src_counts = Counter(get_ngrams(src_tokens, 1))
+    tgt_counts = Counter(get_ngrams(tgt_tokens, 1))
+
+    total_gen = sum(gen_counts.values())
+    total_tgt = sum(tgt_counts.values())
+
+    # Pillar 2: Factuality / Hallucination Risk (Tokens ungrounded in Source Abstract)
+    overlap_src = sum((gen_counts & src_counts).values())
+    precision_src = (overlap_src / total_gen) if total_gen > 0 else 0.0
+    hallucination_risk = 1.0 - precision_src # Ungrounded fraction (Lower is Better)
+
+    # Pillar 1: Target Highlight Alignment
+    overlap_tgt = sum((gen_counts & tgt_counts).values())
+    precision_tgt = (overlap_tgt / total_gen) if total_gen > 0 else 0.0
+    recall_tgt = (overlap_tgt / total_tgt) if total_tgt > 0 else 0.0
+    f1_tgt = (2 * precision_tgt * recall_tgt / (precision_tgt + recall_tgt)) if (precision_tgt + recall_tgt) > 0 else 0.0
+
+    return {
+        'hallucination_risk': hallucination_risk,
+        'precision_src': precision_src,
+        'precision_tgt': precision_tgt,
+        'recall_tgt': recall_tgt,
+        'f1_tgt': f1_tgt
+    }
+
+def evaluate_core_benchmarks(predictions, sources, references, latencies=None, generated_tokens=None):
+    scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rl_f1_list, rl_p_list, rl_r_list = [], [], []
+
+    for pred, ref in zip(predictions, references):
+        score = scorer.score(ref, pred)
+        rl_f1_list.append(score['rougeL'].fmeasure)
+        rl_p_list.append(score['rougeL'].precision)
+        rl_r_list.append(score['rougeL'].recall)
+
+    sample_metrics = [compute_pillars_for_sample(p, s, r) for p, s, r in zip(predictions, sources, references)]
+
+    results = {
+        # Pillar 1: Overall Quality (↑ Higher is Better)
+        'overall_quality_rougeL_f1': float(np.mean(rl_f1_list)),
+        'rougeL_precision': float(np.mean(rl_p_list)),
+        'rougeL_recall': float(np.mean(rl_r_list)),
+        'f1_score_target': float(np.mean([x['f1_tgt'] for x in sample_metrics])),
+        'precision_target': float(np.mean([x['precision_tgt'] for x in sample_metrics])),
+        'recall_target': float(np.mean([x['recall_tgt'] for x in sample_metrics])),
+
+        # Pillar 2: Hallucination Risk (↓ Lower is Better)
+        'hallucination_risk_pct': float(np.mean([x['hallucination_risk'] for x in sample_metrics])),
+        'source_grounding_precision': float(np.mean([x['precision_src'] for x in sample_metrics])),
+    }
+
+    # Pillar 3: Inference Time & Speed
+    if latencies is not None and len(latencies) > 0:
+        results['wall_clock_latency_sec'] = float(np.mean(latencies)) # ↓ Lower is Better
+        results['total_wall_clock_sec'] = float(np.sum(latencies))
+
+    if generated_tokens is not None and latencies is not None and len(latencies) > 0:
+        tokens_per_sec = [t / max(l, 1e-4) for t, l in zip(generated_tokens, latencies)]
+        results['throughput_tokens_per_sec'] = float(np.mean(tokens_per_sec)) # ↑ Higher is Better
+
+    return results
+
+print('✅ 3-Pillar Benchmark Engine Loaded!')
+
+
+--- CELL 5 (code) ---
+# Step 5: Train & Optimize Microsoft Phi-3-Mini-4K-Instruct (4-bit QLoRA)
+HF_TOKEN = '' # HuggingFace Token for gated models
+NUM_EPOCHS = 3
+BATCH_SIZE = 2
+GRAD_ACCUM = 8
+SAVE_STEPS = 100
+
+import gc
+from datasets import Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    Trainer,
+    TrainingArguments,
+    DataCollatorForSeq2Seq,
+    DataCollatorForLanguageModeling,
+    BitsAndBytesConfig
+)
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+
+compute_dtype = torch.float16 if not torch.cuda.is_bf16_supported() else torch.bfloat16
+device_map = {'': 0} if torch.cuda.is_available() else None
+
+train_df = pd.read_csv(TRAIN_CSV).dropna(subset=['Abstract', 'Highlights'])
+val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+
+tokenizer = AutoTokenizer.from_pretrained('microsoft/Phi-3-mini-4k-instruct', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = 'right'
+
+# Preprocess with Strict Token Limits
+def prep(batch):
+    texts = [f'<|user|>\nExtract concise scientific highlights for this abstract:\n{a.strip()}<|end|>\n<|assistant|>\n{h.strip()}<|end|>' for a, h in zip(batch['Abstract'], batch['Highlights'])]
+    tok = tokenizer(texts, max_length=MAX_SOURCE_LENGTH + MAX_TARGET_LENGTH, truncation=True)
+    tok['labels'] = tok['input_ids'].copy()
+    return tok
+raw_train_ds = Dataset.from_pandas(train_df, preserve_index=False)
+train_ds = raw_train_ds.map(prep, batched=True, remove_columns=raw_train_ds.column_names)
+raw_val_ds = Dataset.from_pandas(val_df, preserve_index=False)
+val_ds = raw_val_ds.map(prep, batched=True, remove_columns=raw_val_ds.column_names)
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type='nf4',
+    bnb_4bit_compute_dtype=compute_dtype,
+    bnb_4bit_use_double_quant=True
+)
+model = AutoModelForCausalLM.from_pretrained(
+    'microsoft/Phi-3-mini-4k-instruct',
+    quantization_config=bnb_config,
+    device_map=device_map,
+    torch_dtype=compute_dtype,
+    trust_remote_code=True,
+    token=HF_TOKEN or None
+)
+model = prepare_model_for_kbit_training(model)
+peft_config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=['o_proj', 'qkv_proj', 'gate_up_proj', 'down_proj'],
+    bias='none'
+)
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+
+training_args = TrainingArguments(
+    output_dir=MODEL_CHECKPOINT_DIR,
+    per_device_train_batch_size=BATCH_SIZE,
+    gradient_accumulation_steps=GRAD_ACCUM,
+    learning_rate=2e-4,
+    num_train_epochs=NUM_EPOCHS,
+    logging_steps=10,
+    save_strategy='steps',
+    save_steps=SAVE_STEPS,
+    save_total_limit=2,
+    fp16=True if not torch.cuda.is_bf16_supported() else False,
+    bf16=True if torch.cuda.is_bf16_supported() else False,
+    optim='paged_adamw_8bit' if True else 'adamw_torch',
+    report_to='none'
+)
+data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+trainer = Trainer(model=model, args=training_args, train_dataset=train_ds, eval_dataset=val_ds, tokenizer=tokenizer, data_collator=data_collator)
+# Checkpoint Resuming Check
+resume_ckpt = None
+if os.path.exists(MODEL_CHECKPOINT_DIR):
+    ckpts = [os.path.join(MODEL_CHECKPOINT_DIR, d) for d in os.listdir(MODEL_CHECKPOINT_DIR) if d.startswith('checkpoint-') and os.path.isdir(os.path.join(MODEL_CHECKPOINT_DIR, d))]
+    if ckpts:
+        ckpts.sort(key=lambda x: int(x.split('-')[-1]))
+        resume_ckpt = ckpts[-1]
+        print('--> 🔄 Found previous checkpoint on Google Drive! Resuming from:', resume_ckpt)
+
+print('Starting training...')
+trainer.train(resume_from_checkpoint=resume_ckpt)
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+trainer.save_model(final_adapter)
+tokenizer.save_pretrained(final_adapter)
+print('✅ Fine-tuned adapter saved to Drive:', final_adapter)
+
+del model, trainer
+torch.cuda.empty_cache()
+gc.collect()
+
+
+--- CELL 6 (code) ---
+# Step 6: Benchmarking & Test Predictions for Microsoft Phi-3-Mini-4K-Instruct (4-bit QLoRA)
+MAX_EVAL_SAMPLES = 100 # Validation samples to evaluate
+
+import time
+import json
+from peft import PeftModel
+
+eval_val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+if MAX_EVAL_SAMPLES and len(eval_val_df) > MAX_EVAL_SAMPLES:
+    eval_val_df = eval_val_df.iloc[:MAX_EVAL_SAMPLES]
+
+test_df = pd.read_csv(TEST_CSV)
+test_df['Abstract'] = test_df['Abstract'].fillna('')
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+tokenizer = AutoTokenizer.from_pretrained(final_adapter if os.path.exists(final_adapter) else 'microsoft/Phi-3-mini-4k-instruct', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+base_m = AutoModelForCausalLM.from_pretrained(
+    'microsoft/Phi-3-mini-4k-instruct',
+    quantization_config=BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_compute_dtype=compute_dtype),
+    device_map=device_map,
+    torch_dtype=compute_dtype,
+    token=HF_TOKEN or None,
+    trust_remote_code=True
+)
+if os.path.exists(final_adapter):
+    print('--> Loading fine-tuned adapter weights from Drive...')
+    eval_model = PeftModel.from_pretrained(base_m, final_adapter)
+else:
+    print('--> No fine-tuned adapter found, evaluating base model...')
+    eval_model = base_m
+
+eval_model.eval()
+
+# GPU Warmup
+with torch.no_grad():
+    w_in = tokenizer(f'<|user|>\nExtract concise scientific highlights for this abstract:\n{"warmup"}<|end|>\n<|assistant|>\n', return_tensors='pt').to(eval_model.device)
+    _ = eval_model.generate(**w_in, max_new_tokens=10)
+
+predictions, latencies, token_counts = [], [], []
+sources = eval_val_df['Abstract'].tolist()
+references = eval_val_df['Highlights'].tolist()
+
+print(f'Benchmarking {len(eval_val_df)} validation samples (Uniform Input={MAX_SOURCE_LENGTH}, Output={MAX_TARGET_LENGTH})...')
+for i, abs_text in enumerate(sources):
+    prompt = f'<|user|>\nExtract concise scientific highlights for this abstract:\n{abs_text.strip()}<|end|>\n<|assistant|>\n'
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        out = eval_model.generate(
+            **in_t,
+            max_new_tokens=MAX_TARGET_LENGTH,
+            do_sample=False,
+            repetition_penalty=1.1,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    elapsed = time.perf_counter() - t0
+    latencies.append(elapsed)
+
+    new_toks = out[0][p_len:]
+    pred_text = tokenizer.decode(new_toks, skip_special_tokens=True).strip()
+    n_toks = len(new_toks)
+    predictions.append(pred_text)
+    token_counts.append(n_toks)
+    if (i + 1) % 25 == 0 or (i + 1) == len(eval_val_df):
+        print(f'  Sample {i+1}/{len(eval_val_df)} | Latency: {elapsed:.2f}s ({n_toks} tokens)')
+
+# Compute 3-Pillar Benchmarks
+bench_res = evaluate_core_benchmarks(predictions, sources, references, latencies, token_counts)
+bench_res['model'] = 'phi-3-mini'
+bench_res['model_id'] = 'microsoft/Phi-3-mini-4k-instruct'
+bench_res['max_source_length'] = MAX_SOURCE_LENGTH
+bench_res['max_target_length'] = MAX_TARGET_LENGTH
+
+res_file = os.path.join(RESULTS_DIR, 'benchmark_phi-3-mini.json')
+with open(res_file, 'w') as f:
+    json.dump(bench_res, f, indent=4)
+print('✅ 3-Pillar Benchmark saved to:', res_file)
+
+# Generate Masked Test Predictions
+print(f'Generating test highlights for {len(test_df)} masked samples...')
+test_preds = []
+for idx, abs_text in enumerate(test_df['Abstract']):
+    prompt = f'<|user|>\nExtract concise scientific highlights for this abstract:\n{abs_text.strip()}<|end|>\n<|assistant|>\n'
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+    with torch.no_grad():
+        out = eval_model.generate(**in_t, max_new_tokens=MAX_TARGET_LENGTH, do_sample=False, pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id)
+    pred_str = tokenizer.decode(out[0][p_len:], skip_special_tokens=True).strip()
+    test_preds.append(pred_str)
+    if (idx + 1) % 100 == 0 or (idx + 1) == len(test_df):
+        print(f'  Test progress: {idx+1}/{len(test_df)}')
+
+test_sub_df = test_df.copy()
+test_sub_df['Highlights'] = test_preds
+test_sub_csv = os.path.join(RESULTS_DIR, 'MixSub-SciHigh_test_predictions_phi-3-mini.csv')
+test_sub_df.to_csv(test_sub_csv, index=False)
+print('✅ Masked test predictions saved to:', test_sub_csv)
+
+del eval_model, base_m
+torch.cuda.empty_cache()
+gc.collect()
+
+
+================================================================================
+NOTEBOOK: 04_BioMistral_7B.ipynb
+================================================================================
+
+--- CELL 0 (markdown) ---
+# 🔬 Model Pipeline: BioMistral-7B Biomedical LLM (4-bit QLoRA)
+### **Jadavpur University Research Internship | Under: Prof. Tohida Rehman**
+**Track:** FIRE MixSub-SciHigh Scientific Highlight Summarization
+**Model ID:** `BioMistral/BioMistral-7B`
+**Architecture:** CAUSAL (4-bit QLoRA)
+
+---
+### 🎯 Strict Uniform Benchmark Constraints (Scientifically Fair)
+- **`MAX_SOURCE_LENGTH = 512` tokens**: Uniform input length across all 6 models.
+- **`MAX_TARGET_LENGTH = 128` tokens**: Uniform output generation limit across all 6 models.
+
+### 📊 The 3 Non-Redundant Benchmark Pillars Measured:
+1. **Overall Quality**: ROUGE-L F1 (↑ Higher is Better) & Target F1 Score (↑)
+2. **Hallucination Risk**: Ungrounded Token % (↓ Lower is Better) & Precision Source (% grounded in abstract)
+3. **Inference Time**: Wall-Clock Latency per Sample (↓ Lower is Faster) & Throughput (tok/s ↑)
+
+--- CELL 1 (code) ---
+# Step 1: Mount Google Drive for Persistent Checkpoint Resuming
+from google.colab import drive
+import os
+
+drive.mount('/content/drive')
+
+DRIVE_BASE_DIR = '/content/drive/MyDrive/JU_Benchmark_Project'
+MODEL_CHECKPOINT_DIR = os.path.join(DRIVE_BASE_DIR, 'checkpoints', 'biomistral-7b')
+RESULTS_DIR = os.path.join(DRIVE_BASE_DIR, 'results')
+DATASET_DIR = os.path.join(DRIVE_BASE_DIR, 'Dataset')
+
+os.makedirs(MODEL_CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(DATASET_DIR, exist_ok=True)
+
+# Uniform Token Limits Across All Models
+MAX_SOURCE_LENGTH = 512
+MAX_TARGET_LENGTH = 128
+
+print('✅ Drive mounted!')
+print('📁 Checkpoint directory:', MODEL_CHECKPOINT_DIR)
+print('📁 Results directory:   ', RESULTS_DIR)
+print(f'📏 Uniform Token Limits: Input={MAX_SOURCE_LENGTH} | Output={MAX_TARGET_LENGTH}')
+
+
+--- CELL 2 (code) ---
+# Step 2: Install Libraries
+!pip install -q --upgrade pip
+!pip install -q --upgrade "torchao>=0.16.0"
+!pip install -q transformers peft bitsandbytes datasets accelerate evaluate rouge-score tabulate
+
+import torch
+print('CUDA Available:', torch.cuda.is_available())
+if torch.cuda.is_available():
+    print('GPU Device:', torch.cuda.get_device_name(0))
+    print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+
+
+--- CELL 3 (code) ---
+# Step 3: Verify Dataset Files
+import pandas as pd
+
+TRAIN_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_train_FIRE.csv')
+VAL_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_val_FIRE.csv')
+TEST_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_test_FIRE(Masked).csv')
+
+for p, name in [(TRAIN_CSV, 'Train'), (VAL_CSV, 'Val'), (TEST_CSV, 'Test')]:
+    if os.path.exists(p):
+        df = pd.read_csv(p)
+        print(f'✅ {name} set ready: {len(df):,} rows')
+    else:
+        print(f'⚠️ Warning: {p} not found in Drive. Please upload to {DATASET_DIR}')
+
+
+--- CELL 4 (code) ---
+# Step 4: Core Metric Calculations (3 Pillars: Quality, Hallucination Risk, Latency)
+import re
+from collections import Counter
+import numpy as np
+from rouge_score import rouge_scorer
+
+def clean_tokenize(text):
+    if not isinstance(text, str):
+        return []
+    return re.findall(r'\b[a-zA-Z0-9]+(?:\'[a-zA-Z0-9]+)?\b', text.lower())
+
+def get_ngrams(tokens, n=1):
+    if len(tokens) < n or n < 1:
+        return []
+    return [tuple(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+
+def compute_pillars_for_sample(gen_text, src_text, tgt_text):
+    gen_tokens = clean_tokenize(gen_text)
+    src_tokens = clean_tokenize(src_text)
+    tgt_tokens = clean_tokenize(tgt_text)
+
+    gen_counts = Counter(get_ngrams(gen_tokens, 1))
+    src_counts = Counter(get_ngrams(src_tokens, 1))
+    tgt_counts = Counter(get_ngrams(tgt_tokens, 1))
+
+    total_gen = sum(gen_counts.values())
+    total_tgt = sum(tgt_counts.values())
+
+    # Pillar 2: Factuality / Hallucination Risk (Tokens ungrounded in Source Abstract)
+    overlap_src = sum((gen_counts & src_counts).values())
+    precision_src = (overlap_src / total_gen) if total_gen > 0 else 0.0
+    hallucination_risk = 1.0 - precision_src # Ungrounded fraction (Lower is Better)
+
+    # Pillar 1: Target Highlight Alignment
+    overlap_tgt = sum((gen_counts & tgt_counts).values())
+    precision_tgt = (overlap_tgt / total_gen) if total_gen > 0 else 0.0
+    recall_tgt = (overlap_tgt / total_tgt) if total_tgt > 0 else 0.0
+    f1_tgt = (2 * precision_tgt * recall_tgt / (precision_tgt + recall_tgt)) if (precision_tgt + recall_tgt) > 0 else 0.0
+
+    return {
+        'hallucination_risk': hallucination_risk,
+        'precision_src': precision_src,
+        'precision_tgt': precision_tgt,
+        'recall_tgt': recall_tgt,
+        'f1_tgt': f1_tgt
+    }
+
+def evaluate_core_benchmarks(predictions, sources, references, latencies=None, generated_tokens=None):
+    scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rl_f1_list, rl_p_list, rl_r_list = [], [], []
+
+    for pred, ref in zip(predictions, references):
+        score = scorer.score(ref, pred)
+        rl_f1_list.append(score['rougeL'].fmeasure)
+        rl_p_list.append(score['rougeL'].precision)
+        rl_r_list.append(score['rougeL'].recall)
+
+    sample_metrics = [compute_pillars_for_sample(p, s, r) for p, s, r in zip(predictions, sources, references)]
+
+    results = {
+        # Pillar 1: Overall Quality (↑ Higher is Better)
+        'overall_quality_rougeL_f1': float(np.mean(rl_f1_list)),
+        'rougeL_precision': float(np.mean(rl_p_list)),
+        'rougeL_recall': float(np.mean(rl_r_list)),
+        'f1_score_target': float(np.mean([x['f1_tgt'] for x in sample_metrics])),
+        'precision_target': float(np.mean([x['precision_tgt'] for x in sample_metrics])),
+        'recall_target': float(np.mean([x['recall_tgt'] for x in sample_metrics])),
+
+        # Pillar 2: Hallucination Risk (↓ Lower is Better)
+        'hallucination_risk_pct': float(np.mean([x['hallucination_risk'] for x in sample_metrics])),
+        'source_grounding_precision': float(np.mean([x['precision_src'] for x in sample_metrics])),
+    }
+
+    # Pillar 3: Inference Time & Speed
+    if latencies is not None and len(latencies) > 0:
+        results['wall_clock_latency_sec'] = float(np.mean(latencies)) # ↓ Lower is Better
+        results['total_wall_clock_sec'] = float(np.sum(latencies))
+
+    if generated_tokens is not None and latencies is not None and len(latencies) > 0:
+        tokens_per_sec = [t / max(l, 1e-4) for t, l in zip(generated_tokens, latencies)]
+        results['throughput_tokens_per_sec'] = float(np.mean(tokens_per_sec)) # ↑ Higher is Better
+
+    return results
+
+print('✅ 3-Pillar Benchmark Engine Loaded!')
+
+
+--- CELL 5 (code) ---
+# Step 5: Train & Optimize BioMistral-7B Biomedical LLM (4-bit QLoRA)
+HF_TOKEN = '' # HuggingFace Token for gated models
+NUM_EPOCHS = 3
+BATCH_SIZE = 2
+GRAD_ACCUM = 8
+SAVE_STEPS = 100
+
+import gc
+from datasets import Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    Trainer,
+    TrainingArguments,
+    DataCollatorForSeq2Seq,
+    DataCollatorForLanguageModeling,
+    BitsAndBytesConfig
+)
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+
+compute_dtype = torch.float16 if not torch.cuda.is_bf16_supported() else torch.bfloat16
+device_map = {'': 0} if torch.cuda.is_available() else None
+
+train_df = pd.read_csv(TRAIN_CSV).dropna(subset=['Abstract', 'Highlights'])
+val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+
+tokenizer = AutoTokenizer.from_pretrained('BioMistral/BioMistral-7B', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = 'right'
+
+# Preprocess with Strict Token Limits
+def prep(batch):
+    texts = [f'[INST] Extract key scientific highlights from this paper abstract:\n{a.strip()} [/INST]\n{h.strip()}</s>' for a, h in zip(batch['Abstract'], batch['Highlights'])]
+    tok = tokenizer(texts, max_length=MAX_SOURCE_LENGTH + MAX_TARGET_LENGTH, truncation=True)
+    tok['labels'] = tok['input_ids'].copy()
+    return tok
+raw_train_ds = Dataset.from_pandas(train_df, preserve_index=False)
+train_ds = raw_train_ds.map(prep, batched=True, remove_columns=raw_train_ds.column_names)
+raw_val_ds = Dataset.from_pandas(val_df, preserve_index=False)
+val_ds = raw_val_ds.map(prep, batched=True, remove_columns=raw_val_ds.column_names)
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type='nf4',
+    bnb_4bit_compute_dtype=compute_dtype,
+    bnb_4bit_use_double_quant=True
+)
+model = AutoModelForCausalLM.from_pretrained(
+    'BioMistral/BioMistral-7B',
+    quantization_config=bnb_config,
+    device_map=device_map,
+    torch_dtype=compute_dtype,
+    trust_remote_code=True,
+    token=HF_TOKEN or None
+)
+model = prepare_model_for_kbit_training(model)
+peft_config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'],
+    bias='none'
+)
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+
+training_args = TrainingArguments(
+    output_dir=MODEL_CHECKPOINT_DIR,
+    per_device_train_batch_size=BATCH_SIZE,
+    gradient_accumulation_steps=GRAD_ACCUM,
+    learning_rate=2e-4,
+    num_train_epochs=NUM_EPOCHS,
+    logging_steps=10,
+    save_strategy='steps',
+    save_steps=SAVE_STEPS,
+    save_total_limit=2,
+    fp16=True if not torch.cuda.is_bf16_supported() else False,
+    bf16=True if torch.cuda.is_bf16_supported() else False,
+    optim='paged_adamw_8bit' if True else 'adamw_torch',
+    report_to='none'
+)
+data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+trainer = Trainer(model=model, args=training_args, train_dataset=train_ds, eval_dataset=val_ds, tokenizer=tokenizer, data_collator=data_collator)
+# Checkpoint Resuming Check
+resume_ckpt = None
+if os.path.exists(MODEL_CHECKPOINT_DIR):
+    ckpts = [os.path.join(MODEL_CHECKPOINT_DIR, d) for d in os.listdir(MODEL_CHECKPOINT_DIR) if d.startswith('checkpoint-') and os.path.isdir(os.path.join(MODEL_CHECKPOINT_DIR, d))]
+    if ckpts:
+        ckpts.sort(key=lambda x: int(x.split('-')[-1]))
+        resume_ckpt = ckpts[-1]
+        print('--> 🔄 Found previous checkpoint on Google Drive! Resuming from:', resume_ckpt)
+
+print('Starting training...')
+trainer.train(resume_from_checkpoint=resume_ckpt)
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+trainer.save_model(final_adapter)
+tokenizer.save_pretrained(final_adapter)
+print('✅ Fine-tuned adapter saved to Drive:', final_adapter)
+
+del model, trainer
+torch.cuda.empty_cache()
+gc.collect()
+
+
+--- CELL 6 (code) ---
+# Step 6: Benchmarking & Test Predictions for BioMistral-7B Biomedical LLM (4-bit QLoRA)
+MAX_EVAL_SAMPLES = 100 # Validation samples to evaluate
+
+import time
+import json
+from peft import PeftModel
+
+eval_val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+if MAX_EVAL_SAMPLES and len(eval_val_df) > MAX_EVAL_SAMPLES:
+    eval_val_df = eval_val_df.iloc[:MAX_EVAL_SAMPLES]
+
+test_df = pd.read_csv(TEST_CSV)
+test_df['Abstract'] = test_df['Abstract'].fillna('')
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+tokenizer = AutoTokenizer.from_pretrained(final_adapter if os.path.exists(final_adapter) else 'BioMistral/BioMistral-7B', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+base_m = AutoModelForCausalLM.from_pretrained(
+    'BioMistral/BioMistral-7B',
+    quantization_config=BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_compute_dtype=compute_dtype),
+    device_map=device_map,
+    torch_dtype=compute_dtype,
+    token=HF_TOKEN or None,
+    trust_remote_code=True
+)
+if os.path.exists(final_adapter):
+    print('--> Loading fine-tuned adapter weights from Drive...')
+    eval_model = PeftModel.from_pretrained(base_m, final_adapter)
+else:
+    print('--> No fine-tuned adapter found, evaluating base model...')
+    eval_model = base_m
+
+eval_model.eval()
+
+# GPU Warmup
+with torch.no_grad():
+    w_in = tokenizer(f'[INST] Extract key scientific highlights from this paper abstract:\n{"warmup"} [/INST]\n', return_tensors='pt').to(eval_model.device)
+    _ = eval_model.generate(**w_in, max_new_tokens=10)
+
+predictions, latencies, token_counts = [], [], []
+sources = eval_val_df['Abstract'].tolist()
+references = eval_val_df['Highlights'].tolist()
+
+print(f'Benchmarking {len(eval_val_df)} validation samples (Uniform Input={MAX_SOURCE_LENGTH}, Output={MAX_TARGET_LENGTH})...')
+for i, abs_text in enumerate(sources):
+    prompt = f'[INST] Extract key scientific highlights from this paper abstract:\n{abs_text.strip()} [/INST]\n'
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        out = eval_model.generate(
+            **in_t,
+            max_new_tokens=MAX_TARGET_LENGTH,
+            do_sample=False,
+            repetition_penalty=1.1,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    elapsed = time.perf_counter() - t0
+    latencies.append(elapsed)
+
+    new_toks = out[0][p_len:]
+    pred_text = tokenizer.decode(new_toks, skip_special_tokens=True).strip()
+    n_toks = len(new_toks)
+    predictions.append(pred_text)
+    token_counts.append(n_toks)
+    if (i + 1) % 25 == 0 or (i + 1) == len(eval_val_df):
+        print(f'  Sample {i+1}/{len(eval_val_df)} | Latency: {elapsed:.2f}s ({n_toks} tokens)')
+
+# Compute 3-Pillar Benchmarks
+bench_res = evaluate_core_benchmarks(predictions, sources, references, latencies, token_counts)
+bench_res['model'] = 'biomistral-7b'
+bench_res['model_id'] = 'BioMistral/BioMistral-7B'
+bench_res['max_source_length'] = MAX_SOURCE_LENGTH
+bench_res['max_target_length'] = MAX_TARGET_LENGTH
+
+res_file = os.path.join(RESULTS_DIR, 'benchmark_biomistral-7b.json')
+with open(res_file, 'w') as f:
+    json.dump(bench_res, f, indent=4)
+print('✅ 3-Pillar Benchmark saved to:', res_file)
+
+# Generate Masked Test Predictions
+print(f'Generating test highlights for {len(test_df)} masked samples...')
+test_preds = []
+for idx, abs_text in enumerate(test_df['Abstract']):
+    prompt = f'[INST] Extract key scientific highlights from this paper abstract:\n{abs_text.strip()} [/INST]\n'
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+    with torch.no_grad():
+        out = eval_model.generate(**in_t, max_new_tokens=MAX_TARGET_LENGTH, do_sample=False, pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id)
+    pred_str = tokenizer.decode(out[0][p_len:], skip_special_tokens=True).strip()
+    test_preds.append(pred_str)
+    if (idx + 1) % 100 == 0 or (idx + 1) == len(test_df):
+        print(f'  Test progress: {idx+1}/{len(test_df)}')
+
+test_sub_df = test_df.copy()
+test_sub_df['Highlights'] = test_preds
+test_sub_csv = os.path.join(RESULTS_DIR, 'MixSub-SciHigh_test_predictions_biomistral-7b.csv')
+test_sub_df.to_csv(test_sub_csv, index=False)
+print('✅ Masked test predictions saved to:', test_sub_csv)
+
+del eval_model, base_m
+torch.cuda.empty_cache()
+gc.collect()
+
+
+================================================================================
+NOTEBOOK: 05_Qwen_2.5_7B.ipynb
+================================================================================
+
+--- CELL 0 (markdown) ---
+# 🔬 Model Pipeline: Qwen-2.5-7B-Instruct (4-bit QLoRA)
+### **Jadavpur University Research Internship | Under: Prof. Tohida Rehman**
+**Track:** FIRE MixSub-SciHigh Scientific Highlight Summarization
+**Model ID:** `Qwen/Qwen2.5-7B-Instruct`
+**Architecture:** CAUSAL (4-bit QLoRA)
+
+---
+### 🎯 Strict Uniform Benchmark Constraints (Scientifically Fair)
+- **`MAX_SOURCE_LENGTH = 512` tokens**: Uniform input length across all 6 models.
+- **`MAX_TARGET_LENGTH = 128` tokens**: Uniform output generation limit across all 6 models.
+
+### 📊 The 3 Non-Redundant Benchmark Pillars Measured:
+1. **Overall Quality**: ROUGE-L F1 (↑ Higher is Better) & Target F1 Score (↑)
+2. **Hallucination Risk**: Ungrounded Token % (↓ Lower is Better) & Precision Source (% grounded in abstract)
+3. **Inference Time**: Wall-Clock Latency per Sample (↓ Lower is Faster) & Throughput (tok/s ↑)
+
+--- CELL 1 (code) ---
+# Step 1: Mount Google Drive for Persistent Checkpoint Resuming
+from google.colab import drive
+import os
+
+drive.mount('/content/drive')
+
+DRIVE_BASE_DIR = '/content/drive/MyDrive/JU_Benchmark_Project'
+MODEL_CHECKPOINT_DIR = os.path.join(DRIVE_BASE_DIR, 'checkpoints', 'qwen-2.5-7b')
+RESULTS_DIR = os.path.join(DRIVE_BASE_DIR, 'results')
+DATASET_DIR = os.path.join(DRIVE_BASE_DIR, 'Dataset')
+
+os.makedirs(MODEL_CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(DATASET_DIR, exist_ok=True)
+
+# Uniform Token Limits Across All Models
+MAX_SOURCE_LENGTH = 512
+MAX_TARGET_LENGTH = 128
+
+print('✅ Drive mounted!')
+print('📁 Checkpoint directory:', MODEL_CHECKPOINT_DIR)
+print('📁 Results directory:   ', RESULTS_DIR)
+print(f'📏 Uniform Token Limits: Input={MAX_SOURCE_LENGTH} | Output={MAX_TARGET_LENGTH}')
+
+
+--- CELL 2 (code) ---
+# Step 2: Install Libraries
+!pip install -q --upgrade pip
+!pip install -q --upgrade "torchao>=0.16.0"
+!pip install -q transformers peft bitsandbytes datasets accelerate evaluate rouge-score tabulate
+
+import torch
+print('CUDA Available:', torch.cuda.is_available())
+if torch.cuda.is_available():
+    print('GPU Device:', torch.cuda.get_device_name(0))
+    print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+
+
+--- CELL 3 (code) ---
+# Step 3: Verify Dataset Files
+import pandas as pd
+
+TRAIN_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_train_FIRE.csv')
+VAL_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_val_FIRE.csv')
+TEST_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_test_FIRE(Masked).csv')
+
+for p, name in [(TRAIN_CSV, 'Train'), (VAL_CSV, 'Val'), (TEST_CSV, 'Test')]:
+    if os.path.exists(p):
+        df = pd.read_csv(p)
+        print(f'✅ {name} set ready: {len(df):,} rows')
+    else:
+        print(f'⚠️ Warning: {p} not found in Drive. Please upload to {DATASET_DIR}')
+
+
+--- CELL 4 (code) ---
+# Step 4: Core Metric Calculations (3 Pillars: Quality, Hallucination Risk, Latency)
+import re
+from collections import Counter
+import numpy as np
+from rouge_score import rouge_scorer
+
+def clean_tokenize(text):
+    if not isinstance(text, str):
+        return []
+    return re.findall(r'\b[a-zA-Z0-9]+(?:\'[a-zA-Z0-9]+)?\b', text.lower())
+
+def get_ngrams(tokens, n=1):
+    if len(tokens) < n or n < 1:
+        return []
+    return [tuple(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+
+def compute_pillars_for_sample(gen_text, src_text, tgt_text):
+    gen_tokens = clean_tokenize(gen_text)
+    src_tokens = clean_tokenize(src_text)
+    tgt_tokens = clean_tokenize(tgt_text)
+
+    gen_counts = Counter(get_ngrams(gen_tokens, 1))
+    src_counts = Counter(get_ngrams(src_tokens, 1))
+    tgt_counts = Counter(get_ngrams(tgt_tokens, 1))
+
+    total_gen = sum(gen_counts.values())
+    total_tgt = sum(tgt_counts.values())
+
+    # Pillar 2: Factuality / Hallucination Risk (Tokens ungrounded in Source Abstract)
+    overlap_src = sum((gen_counts & src_counts).values())
+    precision_src = (overlap_src / total_gen) if total_gen > 0 else 0.0
+    hallucination_risk = 1.0 - precision_src # Ungrounded fraction (Lower is Better)
+
+    # Pillar 1: Target Highlight Alignment
+    overlap_tgt = sum((gen_counts & tgt_counts).values())
+    precision_tgt = (overlap_tgt / total_gen) if total_gen > 0 else 0.0
+    recall_tgt = (overlap_tgt / total_tgt) if total_tgt > 0 else 0.0
+    f1_tgt = (2 * precision_tgt * recall_tgt / (precision_tgt + recall_tgt)) if (precision_tgt + recall_tgt) > 0 else 0.0
+
+    return {
+        'hallucination_risk': hallucination_risk,
+        'precision_src': precision_src,
+        'precision_tgt': precision_tgt,
+        'recall_tgt': recall_tgt,
+        'f1_tgt': f1_tgt
+    }
+
+def evaluate_core_benchmarks(predictions, sources, references, latencies=None, generated_tokens=None):
+    scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rl_f1_list, rl_p_list, rl_r_list = [], [], []
+
+    for pred, ref in zip(predictions, references):
+        score = scorer.score(ref, pred)
+        rl_f1_list.append(score['rougeL'].fmeasure)
+        rl_p_list.append(score['rougeL'].precision)
+        rl_r_list.append(score['rougeL'].recall)
+
+    sample_metrics = [compute_pillars_for_sample(p, s, r) for p, s, r in zip(predictions, sources, references)]
+
+    results = {
+        # Pillar 1: Overall Quality (↑ Higher is Better)
+        'overall_quality_rougeL_f1': float(np.mean(rl_f1_list)),
+        'rougeL_precision': float(np.mean(rl_p_list)),
+        'rougeL_recall': float(np.mean(rl_r_list)),
+        'f1_score_target': float(np.mean([x['f1_tgt'] for x in sample_metrics])),
+        'precision_target': float(np.mean([x['precision_tgt'] for x in sample_metrics])),
+        'recall_target': float(np.mean([x['recall_tgt'] for x in sample_metrics])),
+
+        # Pillar 2: Hallucination Risk (↓ Lower is Better)
+        'hallucination_risk_pct': float(np.mean([x['hallucination_risk'] for x in sample_metrics])),
+        'source_grounding_precision': float(np.mean([x['precision_src'] for x in sample_metrics])),
+    }
+
+    # Pillar 3: Inference Time & Speed
+    if latencies is not None and len(latencies) > 0:
+        results['wall_clock_latency_sec'] = float(np.mean(latencies)) # ↓ Lower is Better
+        results['total_wall_clock_sec'] = float(np.sum(latencies))
+
+    if generated_tokens is not None and latencies is not None and len(latencies) > 0:
+        tokens_per_sec = [t / max(l, 1e-4) for t, l in zip(generated_tokens, latencies)]
+        results['throughput_tokens_per_sec'] = float(np.mean(tokens_per_sec)) # ↑ Higher is Better
+
+    return results
+
+print('✅ 3-Pillar Benchmark Engine Loaded!')
+
+
+--- CELL 5 (code) ---
+# Step 5: Train & Optimize Qwen-2.5-7B-Instruct (4-bit QLoRA)
+HF_TOKEN = '' # HuggingFace Token for gated models
+NUM_EPOCHS = 3
+BATCH_SIZE = 2
+GRAD_ACCUM = 8
+SAVE_STEPS = 100
+
+import gc
+from datasets import Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    Trainer,
+    TrainingArguments,
+    DataCollatorForSeq2Seq,
+    DataCollatorForLanguageModeling,
+    BitsAndBytesConfig
+)
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+
+compute_dtype = torch.float16 if not torch.cuda.is_bf16_supported() else torch.bfloat16
+device_map = {'': 0} if torch.cuda.is_available() else None
+
+train_df = pd.read_csv(TRAIN_CSV).dropna(subset=['Abstract', 'Highlights'])
+val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+
+tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen2.5-7B-Instruct', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = 'right'
+
+# Preprocess with Strict Token Limits
+def prep(batch):
+    texts = [f'<|im_start|>system\nYou are an expert scientific researcher. Extract concise, factual research highlights.<|im_end|>\n<|im_start|>user\nAbstract:\n{a.strip()}<|im_end|>\n<|im_start|>assistant\n{h.strip()}<|im_end|>' for a, h in zip(batch['Abstract'], batch['Highlights'])]
+    tok = tokenizer(texts, max_length=MAX_SOURCE_LENGTH + MAX_TARGET_LENGTH, truncation=True)
+    tok['labels'] = tok['input_ids'].copy()
+    return tok
+raw_train_ds = Dataset.from_pandas(train_df, preserve_index=False)
+train_ds = raw_train_ds.map(prep, batched=True, remove_columns=raw_train_ds.column_names)
+raw_val_ds = Dataset.from_pandas(val_df, preserve_index=False)
+val_ds = raw_val_ds.map(prep, batched=True, remove_columns=raw_val_ds.column_names)
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type='nf4',
+    bnb_4bit_compute_dtype=compute_dtype,
+    bnb_4bit_use_double_quant=True
+)
+model = AutoModelForCausalLM.from_pretrained(
+    'Qwen/Qwen2.5-7B-Instruct',
+    quantization_config=bnb_config,
+    device_map=device_map,
+    torch_dtype=compute_dtype,
+    trust_remote_code=True,
+    token=HF_TOKEN or None
+)
+model = prepare_model_for_kbit_training(model)
+peft_config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'],
+    bias='none'
+)
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+
+training_args = TrainingArguments(
+    output_dir=MODEL_CHECKPOINT_DIR,
+    per_device_train_batch_size=BATCH_SIZE,
+    gradient_accumulation_steps=GRAD_ACCUM,
+    learning_rate=2e-4,
+    num_train_epochs=NUM_EPOCHS,
+    logging_steps=10,
+    save_strategy='steps',
+    save_steps=SAVE_STEPS,
+    save_total_limit=2,
+    fp16=True if not torch.cuda.is_bf16_supported() else False,
+    bf16=True if torch.cuda.is_bf16_supported() else False,
+    optim='paged_adamw_8bit' if True else 'adamw_torch',
+    report_to='none'
+)
+data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+trainer = Trainer(model=model, args=training_args, train_dataset=train_ds, eval_dataset=val_ds, tokenizer=tokenizer, data_collator=data_collator)
+# Checkpoint Resuming Check
+resume_ckpt = None
+if os.path.exists(MODEL_CHECKPOINT_DIR):
+    ckpts = [os.path.join(MODEL_CHECKPOINT_DIR, d) for d in os.listdir(MODEL_CHECKPOINT_DIR) if d.startswith('checkpoint-') and os.path.isdir(os.path.join(MODEL_CHECKPOINT_DIR, d))]
+    if ckpts:
+        ckpts.sort(key=lambda x: int(x.split('-')[-1]))
+        resume_ckpt = ckpts[-1]
+        print('--> 🔄 Found previous checkpoint on Google Drive! Resuming from:', resume_ckpt)
+
+print('Starting training...')
+trainer.train(resume_from_checkpoint=resume_ckpt)
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+trainer.save_model(final_adapter)
+tokenizer.save_pretrained(final_adapter)
+print('✅ Fine-tuned adapter saved to Drive:', final_adapter)
+
+del model, trainer
+torch.cuda.empty_cache()
+gc.collect()
+
+
+--- CELL 6 (code) ---
+# Step 6: Benchmarking & Test Predictions for Qwen-2.5-7B-Instruct (4-bit QLoRA)
+MAX_EVAL_SAMPLES = 100 # Validation samples to evaluate
+
+import time
+import json
+from peft import PeftModel
+
+eval_val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+if MAX_EVAL_SAMPLES and len(eval_val_df) > MAX_EVAL_SAMPLES:
+    eval_val_df = eval_val_df.iloc[:MAX_EVAL_SAMPLES]
+
+test_df = pd.read_csv(TEST_CSV)
+test_df['Abstract'] = test_df['Abstract'].fillna('')
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+tokenizer = AutoTokenizer.from_pretrained(final_adapter if os.path.exists(final_adapter) else 'Qwen/Qwen2.5-7B-Instruct', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+base_m = AutoModelForCausalLM.from_pretrained(
+    'Qwen/Qwen2.5-7B-Instruct',
+    quantization_config=BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_compute_dtype=compute_dtype),
+    device_map=device_map,
+    torch_dtype=compute_dtype,
+    token=HF_TOKEN or None,
+    trust_remote_code=True
+)
+if os.path.exists(final_adapter):
+    print('--> Loading fine-tuned adapter weights from Drive...')
+    eval_model = PeftModel.from_pretrained(base_m, final_adapter)
+else:
+    print('--> No fine-tuned adapter found, evaluating base model...')
+    eval_model = base_m
+
+eval_model.eval()
+
+# GPU Warmup
+with torch.no_grad():
+    w_in = tokenizer(f'<|im_start|>system\nYou are an expert scientific researcher. Extract concise, factual research highlights.<|im_end|>\n<|im_start|>user\nAbstract:\n{"warmup"}<|im_end|>\n<|im_start|>assistant\n', return_tensors='pt').to(eval_model.device)
+    _ = eval_model.generate(**w_in, max_new_tokens=10)
+
+predictions, latencies, token_counts = [], [], []
+sources = eval_val_df['Abstract'].tolist()
+references = eval_val_df['Highlights'].tolist()
+
+print(f'Benchmarking {len(eval_val_df)} validation samples (Uniform Input={MAX_SOURCE_LENGTH}, Output={MAX_TARGET_LENGTH})...')
+for i, abs_text in enumerate(sources):
+    prompt = f'<|im_start|>system\nYou are an expert scientific researcher. Extract concise, factual research highlights.<|im_end|>\n<|im_start|>user\nAbstract:\n{abs_text.strip()}<|im_end|>\n<|im_start|>assistant\n'
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        out = eval_model.generate(
+            **in_t,
+            max_new_tokens=MAX_TARGET_LENGTH,
+            do_sample=False,
+            repetition_penalty=1.1,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    elapsed = time.perf_counter() - t0
+    latencies.append(elapsed)
+
+    new_toks = out[0][p_len:]
+    pred_text = tokenizer.decode(new_toks, skip_special_tokens=True).strip()
+    n_toks = len(new_toks)
+    predictions.append(pred_text)
+    token_counts.append(n_toks)
+    if (i + 1) % 25 == 0 or (i + 1) == len(eval_val_df):
+        print(f'  Sample {i+1}/{len(eval_val_df)} | Latency: {elapsed:.2f}s ({n_toks} tokens)')
+
+# Compute 3-Pillar Benchmarks
+bench_res = evaluate_core_benchmarks(predictions, sources, references, latencies, token_counts)
+bench_res['model'] = 'qwen-2.5-7b'
+bench_res['model_id'] = 'Qwen/Qwen2.5-7B-Instruct'
+bench_res['max_source_length'] = MAX_SOURCE_LENGTH
+bench_res['max_target_length'] = MAX_TARGET_LENGTH
+
+res_file = os.path.join(RESULTS_DIR, 'benchmark_qwen-2.5-7b.json')
+with open(res_file, 'w') as f:
+    json.dump(bench_res, f, indent=4)
+print('✅ 3-Pillar Benchmark saved to:', res_file)
+
+# Generate Masked Test Predictions
+print(f'Generating test highlights for {len(test_df)} masked samples...')
+test_preds = []
+for idx, abs_text in enumerate(test_df['Abstract']):
+    prompt = f'<|im_start|>system\nYou are an expert scientific researcher. Extract concise, factual research highlights.<|im_end|>\n<|im_start|>user\nAbstract:\n{abs_text.strip()}<|im_end|>\n<|im_start|>assistant\n'
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+    with torch.no_grad():
+        out = eval_model.generate(**in_t, max_new_tokens=MAX_TARGET_LENGTH, do_sample=False, pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id)
+    pred_str = tokenizer.decode(out[0][p_len:], skip_special_tokens=True).strip()
+    test_preds.append(pred_str)
+    if (idx + 1) % 100 == 0 or (idx + 1) == len(test_df):
+        print(f'  Test progress: {idx+1}/{len(test_df)}')
+
+test_sub_df = test_df.copy()
+test_sub_df['Highlights'] = test_preds
+test_sub_csv = os.path.join(RESULTS_DIR, 'MixSub-SciHigh_test_predictions_qwen-2.5-7b.csv')
+test_sub_df.to_csv(test_sub_csv, index=False)
+print('✅ Masked test predictions saved to:', test_sub_csv)
+
+del eval_model, base_m
+torch.cuda.empty_cache()
+gc.collect()
+
+
+================================================================================
+NOTEBOOK: 06_Llama_3.1_8B.ipynb
+================================================================================
+
+--- CELL 0 (markdown) ---
+# 🔬 Model Pipeline: Meta Llama-3.1-8B-Instruct (4-bit QLoRA)
+### **Jadavpur University Research Internship | Under: Prof. Tohida Rehman**
+**Track:** FIRE MixSub-SciHigh Scientific Highlight Summarization
+**Model ID:** `meta-llama/Llama-3.1-8B-Instruct`
+**Architecture:** CAUSAL (4-bit QLoRA)
+
+---
+### 🎯 Strict Uniform Benchmark Constraints (Scientifically Fair)
+- **`MAX_SOURCE_LENGTH = 512` tokens**: Uniform input length across all 6 models.
+- **`MAX_TARGET_LENGTH = 128` tokens**: Uniform output generation limit across all 6 models.
+
+### 📊 The 3 Non-Redundant Benchmark Pillars Measured:
+1. **Overall Quality**: ROUGE-L F1 (↑ Higher is Better) & Target F1 Score (↑)
+2. **Hallucination Risk**: Ungrounded Token % (↓ Lower is Better) & Precision Source (% grounded in abstract)
+3. **Inference Time**: Wall-Clock Latency per Sample (↓ Lower is Faster) & Throughput (tok/s ↑)
+
+--- CELL 1 (code) ---
+# Step 1: Mount Google Drive for Persistent Checkpoint Resuming
+from google.colab import drive
+import os
+
+drive.mount('/content/drive')
+
+DRIVE_BASE_DIR = '/content/drive/MyDrive/JU_Benchmark_Project'
+MODEL_CHECKPOINT_DIR = os.path.join(DRIVE_BASE_DIR, 'checkpoints', 'llama-3.1-8b')
+RESULTS_DIR = os.path.join(DRIVE_BASE_DIR, 'results')
+DATASET_DIR = os.path.join(DRIVE_BASE_DIR, 'Dataset')
+
+os.makedirs(MODEL_CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(DATASET_DIR, exist_ok=True)
+
+# Uniform Token Limits Across All Models
+MAX_SOURCE_LENGTH = 512
+MAX_TARGET_LENGTH = 128
+
+print('✅ Drive mounted!')
+print('📁 Checkpoint directory:', MODEL_CHECKPOINT_DIR)
+print('📁 Results directory:   ', RESULTS_DIR)
+print(f'📏 Uniform Token Limits: Input={MAX_SOURCE_LENGTH} | Output={MAX_TARGET_LENGTH}')
+
+
+--- CELL 2 (code) ---
+# Step 2: Install Libraries
+!pip install -q --upgrade pip
+!pip install -q --upgrade "torchao>=0.16.0"
+!pip install -q transformers peft bitsandbytes datasets accelerate evaluate rouge-score tabulate
+
+import torch
+print('CUDA Available:', torch.cuda.is_available())
+if torch.cuda.is_available():
+    print('GPU Device:', torch.cuda.get_device_name(0))
+    print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB')
+
+
+--- CELL 3 (code) ---
+# Step 3: Verify Dataset Files
+import pandas as pd
+
+TRAIN_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_train_FIRE.csv')
+VAL_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_val_FIRE.csv')
+TEST_CSV = os.path.join(DATASET_DIR, 'MixSub-SciHigh_test_FIRE(Masked).csv')
+
+for p, name in [(TRAIN_CSV, 'Train'), (VAL_CSV, 'Val'), (TEST_CSV, 'Test')]:
+    if os.path.exists(p):
+        df = pd.read_csv(p)
+        print(f'✅ {name} set ready: {len(df):,} rows')
+    else:
+        print(f'⚠️ Warning: {p} not found in Drive. Please upload to {DATASET_DIR}')
+
+
+--- CELL 4 (code) ---
+# Step 4: Core Metric Calculations (3 Pillars: Quality, Hallucination Risk, Latency)
+import re
+from collections import Counter
+import numpy as np
+from rouge_score import rouge_scorer
+
+def clean_tokenize(text):
+    if not isinstance(text, str):
+        return []
+    return re.findall(r'\b[a-zA-Z0-9]+(?:\'[a-zA-Z0-9]+)?\b', text.lower())
+
+def get_ngrams(tokens, n=1):
+    if len(tokens) < n or n < 1:
+        return []
+    return [tuple(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+
+def compute_pillars_for_sample(gen_text, src_text, tgt_text):
+    gen_tokens = clean_tokenize(gen_text)
+    src_tokens = clean_tokenize(src_text)
+    tgt_tokens = clean_tokenize(tgt_text)
+
+    gen_counts = Counter(get_ngrams(gen_tokens, 1))
+    src_counts = Counter(get_ngrams(src_tokens, 1))
+    tgt_counts = Counter(get_ngrams(tgt_tokens, 1))
+
+    total_gen = sum(gen_counts.values())
+    total_tgt = sum(tgt_counts.values())
+
+    # Pillar 2: Factuality / Hallucination Risk (Tokens ungrounded in Source Abstract)
+    overlap_src = sum((gen_counts & src_counts).values())
+    precision_src = (overlap_src / total_gen) if total_gen > 0 else 0.0
+    hallucination_risk = 1.0 - precision_src # Ungrounded fraction (Lower is Better)
+
+    # Pillar 1: Target Highlight Alignment
+    overlap_tgt = sum((gen_counts & tgt_counts).values())
+    precision_tgt = (overlap_tgt / total_gen) if total_gen > 0 else 0.0
+    recall_tgt = (overlap_tgt / total_tgt) if total_tgt > 0 else 0.0
+    f1_tgt = (2 * precision_tgt * recall_tgt / (precision_tgt + recall_tgt)) if (precision_tgt + recall_tgt) > 0 else 0.0
+
+    return {
+        'hallucination_risk': hallucination_risk,
+        'precision_src': precision_src,
+        'precision_tgt': precision_tgt,
+        'recall_tgt': recall_tgt,
+        'f1_tgt': f1_tgt
+    }
+
+def evaluate_core_benchmarks(predictions, sources, references, latencies=None, generated_tokens=None):
+    scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rl_f1_list, rl_p_list, rl_r_list = [], [], []
+
+    for pred, ref in zip(predictions, references):
+        score = scorer.score(ref, pred)
+        rl_f1_list.append(score['rougeL'].fmeasure)
+        rl_p_list.append(score['rougeL'].precision)
+        rl_r_list.append(score['rougeL'].recall)
+
+    sample_metrics = [compute_pillars_for_sample(p, s, r) for p, s, r in zip(predictions, sources, references)]
+
+    results = {
+        # Pillar 1: Overall Quality (↑ Higher is Better)
+        'overall_quality_rougeL_f1': float(np.mean(rl_f1_list)),
+        'rougeL_precision': float(np.mean(rl_p_list)),
+        'rougeL_recall': float(np.mean(rl_r_list)),
+        'f1_score_target': float(np.mean([x['f1_tgt'] for x in sample_metrics])),
+        'precision_target': float(np.mean([x['precision_tgt'] for x in sample_metrics])),
+        'recall_target': float(np.mean([x['recall_tgt'] for x in sample_metrics])),
+
+        # Pillar 2: Hallucination Risk (↓ Lower is Better)
+        'hallucination_risk_pct': float(np.mean([x['hallucination_risk'] for x in sample_metrics])),
+        'source_grounding_precision': float(np.mean([x['precision_src'] for x in sample_metrics])),
+    }
+
+    # Pillar 3: Inference Time & Speed
+    if latencies is not None and len(latencies) > 0:
+        results['wall_clock_latency_sec'] = float(np.mean(latencies)) # ↓ Lower is Better
+        results['total_wall_clock_sec'] = float(np.sum(latencies))
+
+    if generated_tokens is not None and latencies is not None and len(latencies) > 0:
+        tokens_per_sec = [t / max(l, 1e-4) for t, l in zip(generated_tokens, latencies)]
+        results['throughput_tokens_per_sec'] = float(np.mean(tokens_per_sec)) # ↑ Higher is Better
+
+    return results
+
+print('✅ 3-Pillar Benchmark Engine Loaded!')
+
+
+--- CELL 5 (code) ---
+# Step 5: Train & Optimize Meta Llama-3.1-8B-Instruct (4-bit QLoRA)
+HF_TOKEN = '' # HuggingFace Token for gated models
+NUM_EPOCHS = 3
+BATCH_SIZE = 2
+GRAD_ACCUM = 8
+SAVE_STEPS = 100
+
+import gc
+from datasets import Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    AutoModelForCausalLM,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    Trainer,
+    TrainingArguments,
+    DataCollatorForSeq2Seq,
+    DataCollatorForLanguageModeling,
+    BitsAndBytesConfig
+)
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+
+compute_dtype = torch.float16 if not torch.cuda.is_bf16_supported() else torch.bfloat16
+device_map = {'': 0} if torch.cuda.is_available() else None
+
+train_df = pd.read_csv(TRAIN_CSV).dropna(subset=['Abstract', 'Highlights'])
+val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+
+tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-3.1-8B-Instruct', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = 'right'
+
+# Preprocess with Strict Token Limits
+def prep(batch):
+    texts = [f'<|start_header_id|>system<|end_header_id|>\n\nYou are an expert scientific researcher. Extract concise research highlights.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nAbstract:\n{a.strip()}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{h.strip()}<|eot_id|>' for a, h in zip(batch['Abstract'], batch['Highlights'])]
+    tok = tokenizer(texts, max_length=MAX_SOURCE_LENGTH + MAX_TARGET_LENGTH, truncation=True)
+    tok['labels'] = tok['input_ids'].copy()
+    return tok
+raw_train_ds = Dataset.from_pandas(train_df, preserve_index=False)
+train_ds = raw_train_ds.map(prep, batched=True, remove_columns=raw_train_ds.column_names)
+raw_val_ds = Dataset.from_pandas(val_df, preserve_index=False)
+val_ds = raw_val_ds.map(prep, batched=True, remove_columns=raw_val_ds.column_names)
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type='nf4',
+    bnb_4bit_compute_dtype=compute_dtype,
+    bnb_4bit_use_double_quant=True
+)
+model = AutoModelForCausalLM.from_pretrained(
+    'meta-llama/Llama-3.1-8B-Instruct',
+    quantization_config=bnb_config,
+    device_map=device_map,
+    torch_dtype=compute_dtype,
+    trust_remote_code=True,
+    token=HF_TOKEN or None
+)
+model = prepare_model_for_kbit_training(model)
+peft_config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'],
+    bias='none'
+)
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+
+training_args = TrainingArguments(
+    output_dir=MODEL_CHECKPOINT_DIR,
+    per_device_train_batch_size=BATCH_SIZE,
+    gradient_accumulation_steps=GRAD_ACCUM,
+    learning_rate=2e-4,
+    num_train_epochs=NUM_EPOCHS,
+    logging_steps=10,
+    save_strategy='steps',
+    save_steps=SAVE_STEPS,
+    save_total_limit=2,
+    fp16=True if not torch.cuda.is_bf16_supported() else False,
+    bf16=True if torch.cuda.is_bf16_supported() else False,
+    optim='paged_adamw_8bit' if True else 'adamw_torch',
+    report_to='none'
+)
+data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+trainer = Trainer(model=model, args=training_args, train_dataset=train_ds, eval_dataset=val_ds, tokenizer=tokenizer, data_collator=data_collator)
+# Checkpoint Resuming Check
+resume_ckpt = None
+if os.path.exists(MODEL_CHECKPOINT_DIR):
+    ckpts = [os.path.join(MODEL_CHECKPOINT_DIR, d) for d in os.listdir(MODEL_CHECKPOINT_DIR) if d.startswith('checkpoint-') and os.path.isdir(os.path.join(MODEL_CHECKPOINT_DIR, d))]
+    if ckpts:
+        ckpts.sort(key=lambda x: int(x.split('-')[-1]))
+        resume_ckpt = ckpts[-1]
+        print('--> 🔄 Found previous checkpoint on Google Drive! Resuming from:', resume_ckpt)
+
+print('Starting training...')
+trainer.train(resume_from_checkpoint=resume_ckpt)
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+trainer.save_model(final_adapter)
+tokenizer.save_pretrained(final_adapter)
+print('✅ Fine-tuned adapter saved to Drive:', final_adapter)
+
+del model, trainer
+torch.cuda.empty_cache()
+gc.collect()
+
+
+--- CELL 6 (code) ---
+# Step 6: Benchmarking & Test Predictions for Meta Llama-3.1-8B-Instruct (4-bit QLoRA)
+MAX_EVAL_SAMPLES = 100 # Validation samples to evaluate
+
+import time
+import json
+from peft import PeftModel
+
+eval_val_df = pd.read_csv(VAL_CSV).dropna(subset=['Abstract', 'Highlights'])
+if MAX_EVAL_SAMPLES and len(eval_val_df) > MAX_EVAL_SAMPLES:
+    eval_val_df = eval_val_df.iloc[:MAX_EVAL_SAMPLES]
+
+test_df = pd.read_csv(TEST_CSV)
+test_df['Abstract'] = test_df['Abstract'].fillna('')
+
+final_adapter = os.path.join(MODEL_CHECKPOINT_DIR, 'final_adapter')
+tokenizer = AutoTokenizer.from_pretrained(final_adapter if os.path.exists(final_adapter) else 'meta-llama/Llama-3.1-8B-Instruct', token=HF_TOKEN or None, trust_remote_code=True)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+base_m = AutoModelForCausalLM.from_pretrained(
+    'meta-llama/Llama-3.1-8B-Instruct',
+    quantization_config=BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_compute_dtype=compute_dtype),
+    device_map=device_map,
+    torch_dtype=compute_dtype,
+    token=HF_TOKEN or None,
+    trust_remote_code=True
+)
+if os.path.exists(final_adapter):
+    print('--> Loading fine-tuned adapter weights from Drive...')
+    eval_model = PeftModel.from_pretrained(base_m, final_adapter)
+else:
+    print('--> No fine-tuned adapter found, evaluating base model...')
+    eval_model = base_m
+
+eval_model.eval()
+
+# GPU Warmup
+with torch.no_grad():
+    w_in = tokenizer(f'<|start_header_id|>system<|end_header_id|>\n\nYou are an expert scientific researcher. Extract concise research highlights.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nAbstract:\n{"warmup"}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n', return_tensors='pt').to(eval_model.device)
+    _ = eval_model.generate(**w_in, max_new_tokens=10)
+
+predictions, latencies, token_counts = [], [], []
+sources = eval_val_df['Abstract'].tolist()
+references = eval_val_df['Highlights'].tolist()
+
+print(f'Benchmarking {len(eval_val_df)} validation samples (Uniform Input={MAX_SOURCE_LENGTH}, Output={MAX_TARGET_LENGTH})...')
+for i, abs_text in enumerate(sources):
+    prompt = f'<|start_header_id|>system<|end_header_id|>\n\nYou are an expert scientific researcher. Extract concise research highlights.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nAbstract:\n{abs_text.strip()}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n'
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        out = eval_model.generate(
+            **in_t,
+            max_new_tokens=MAX_TARGET_LENGTH,
+            do_sample=False,
+            repetition_penalty=1.1,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
+    torch.cuda.synchronize() if torch.cuda.is_available() else None
+    elapsed = time.perf_counter() - t0
+    latencies.append(elapsed)
+
+    new_toks = out[0][p_len:]
+    pred_text = tokenizer.decode(new_toks, skip_special_tokens=True).strip()
+    n_toks = len(new_toks)
+    predictions.append(pred_text)
+    token_counts.append(n_toks)
+    if (i + 1) % 25 == 0 or (i + 1) == len(eval_val_df):
+        print(f'  Sample {i+1}/{len(eval_val_df)} | Latency: {elapsed:.2f}s ({n_toks} tokens)')
+
+# Compute 3-Pillar Benchmarks
+bench_res = evaluate_core_benchmarks(predictions, sources, references, latencies, token_counts)
+bench_res['model'] = 'llama-3.1-8b'
+bench_res['model_id'] = 'meta-llama/Llama-3.1-8B-Instruct'
+bench_res['max_source_length'] = MAX_SOURCE_LENGTH
+bench_res['max_target_length'] = MAX_TARGET_LENGTH
+
+res_file = os.path.join(RESULTS_DIR, 'benchmark_llama-3.1-8b.json')
+with open(res_file, 'w') as f:
+    json.dump(bench_res, f, indent=4)
+print('✅ 3-Pillar Benchmark saved to:', res_file)
+
+# Generate Masked Test Predictions
+print(f'Generating test highlights for {len(test_df)} masked samples...')
+test_preds = []
+for idx, abs_text in enumerate(test_df['Abstract']):
+    prompt = f'<|start_header_id|>system<|end_header_id|>\n\nYou are an expert scientific researcher. Extract concise research highlights.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nAbstract:\n{abs_text.strip()}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n'
+
+    in_t = tokenizer(prompt, max_length=MAX_SOURCE_LENGTH, truncation=True, return_tensors='pt').to(eval_model.device)
+    p_len = in_t['input_ids'].shape[1]
+    with torch.no_grad():
+        out = eval_model.generate(**in_t, max_new_tokens=MAX_TARGET_LENGTH, do_sample=False, pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id)
+    pred_str = tokenizer.decode(out[0][p_len:], skip_special_tokens=True).strip()
+    test_preds.append(pred_str)
+    if (idx + 1) % 100 == 0 or (idx + 1) == len(test_df):
+        print(f'  Test progress: {idx+1}/{len(test_df)}')
+
+test_sub_df = test_df.copy()
+test_sub_df['Highlights'] = test_preds
+test_sub_csv = os.path.join(RESULTS_DIR, 'MixSub-SciHigh_test_predictions_llama-3.1-8b.csv')
+test_sub_df.to_csv(test_sub_csv, index=False)
+print('✅ Masked test predictions saved to:', test_sub_csv)
+
+del eval_model, base_m
+torch.cuda.empty_cache()
+gc.collect()
+
+
+================================================================================
+NOTEBOOK: 07_Master_Benchmark_Comparison_and_Visualizations.ipynb
+================================================================================
+
+--- CELL 0 (markdown) ---
+# 🏆 Master Benchmark Comparison & Publication Visualizations
+### **Jadavpur University Research Internship | Under: Prof. Tohida Rehman**
+**Track:** FIRE MixSub-SciHigh Scientific Highlight Summarization
+
+---
+## 📌 Strict Scientific Benchmark Setup
+- **Identical Token Limits Across All Models**: `MAX_SOURCE_LENGTH = 512` & `MAX_TARGET_LENGTH = 128`
+- **The 3 Non-Redundant Core Research Pillars Evaluated:**
+
+| Pillar | Core Metric | What It Means | Direction (Better) |
+| :--- | :--- | :--- | :---: |
+| **Pillar 1: Overall Quality** | **ROUGE-L F1** & **Target F1** | Syntactic fluency and semantic overlap with ground-truth author highlights | **Higher is Better (↑)** |
+| **Pillar 2: Hallucination Risk** | **Ungrounded Token %** & **Source Grounding %** | Percentage of claims made that have ZERO basis in the source paper abstract | **Lower is Better (↓)** |
+| **Pillar 3: Inference Time** | **Wall-Clock Latency (sec)** & **Throughput (tok/s)** | Real-world GPU execution time per paper and generation serving speed | **Lower Latency (↓) / Higher Tok/s (↑)** |
+
+
+--- CELL 1 (code) ---
+# Step 1: Mount Google Drive
+from google.colab import drive
+import os
+
+drive.mount('/content/drive')
+DRIVE_BASE_DIR = '/content/drive/MyDrive/JU_Benchmark_Project'
+RESULTS_DIR = os.path.join(DRIVE_BASE_DIR, 'results')
+PLOTS_DIR = os.path.join(RESULTS_DIR, 'plots')
+os.makedirs(PLOTS_DIR, exist_ok=True)
+
+print('📁 Reading results from:', RESULTS_DIR)
+print('📁 Saving plots to:     ', PLOTS_DIR)
+
+
+--- CELL 2 (code) ---
+# Step 2: Install Libraries
+!pip install -q tabulate matplotlib seaborn pandas
+
+
+--- CELL 3 (code) ---
+# Step 3: Compile and Display 3-Pillar Master Benchmark Table
+import glob
+import json
+import pandas as pd
+from tabulate import tabulate
+
+json_files = glob.glob(os.path.join(RESULTS_DIR, 'benchmark_*.json'))
+
+if not json_files:
+    print('⚠️ No benchmark_*.json files found yet in Drive results folder.')
+    print('Please run individual model notebooks (01 to 06) first!')
+else:
+    all_metrics = []
+    for jf in sorted(json_files):
+        with open(jf, 'r') as f:
+            all_metrics.append(json.load(f))
+
+    summary_rows = []
+    for m in all_metrics:
+        summary_rows.append({
+            'Model': m.get('model', 'N/A').upper(),
+            # Pillar 1: Overall Quality (↑)
+            'Overall Quality [ROUGE-L F1] (↑)': f"{m.get('overall_quality_rougeL_f1', 0)*100:.2f}%",
+            'Target F1 Score (↑)': f"{m.get('f1_score_target', 0)*100:.2f}%",
+            # Pillar 2: Hallucination Risk (↓)
+            'Hallucination Risk [% Ungrounded] (↓)': f"{m.get('hallucination_risk_pct', 0)*100:.2f}%",
+            'Source Grounding [% Grounded] (↑)': f"{m.get('source_grounding_precision', 0)*100:.2f}%",
+            # Pillar 3: Inference Time (↓/↑)
+            'Wall-Clock Latency (↓)': f"{m.get('wall_clock_latency_sec', 0):.2f}s",
+            'Throughput (↑)': f"{m.get('throughput_tokens_per_sec', 0):.1f} tok/s"
+        })
+
+    comparison_df = pd.DataFrame(summary_rows)
+    master_csv = os.path.join(RESULTS_DIR, 'master_3pillar_benchmark_comparison.csv')
+    comparison_df.to_csv(master_csv, index=False)
+
+    print('\n' + '='*100)
+    print('🏆 3-PILLAR SCIENTIFIC BENCHMARK MATRIX (Quality vs Hallucination vs Latency)')
+    print('='*100)
+    print(tabulate(comparison_df, headers='keys', tablefmt='github', showindex=False))
+    print(f'\n📁 Master CSV saved to: {master_csv}')
+
+
+--- CELL 4 (code) ---
+# Step 4: Render High-Resolution 300-DPI Visual Figures (The 3 Pillars)
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+
+if not json_files:
+    print('Cannot plot: No benchmark results found.')
+else:
+    df_raw = pd.DataFrame(all_metrics)
+    sns.set_theme(style='whitegrid', font_scale=1.1)
+    PALETTE = ['#2b5c8f', '#e26d5c', '#38b000', '#7209b7', '#f77f00', '#4cc9f0']
+
+    # Figure 1: Pillar 1 vs Pillar 3 -> Overall Quality vs. Inference Time (Pareto Frontier)
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+    x = df_raw['wall_clock_latency_sec']
+    y = df_raw['overall_quality_rougeL_f1'] * 100
+    ax.scatter(x, y, c=range(len(df_raw)), cmap='viridis', s=500, alpha=0.9, edgecolors='black', linewidth=1.5, zorder=3)
+    for i, txt in enumerate(df_raw['model']):
+        ax.annotate(f' {txt.upper()}', (x.iloc[i], y.iloc[i]), fontsize=10, fontweight='bold', xytext=(8, 4), textcoords='offset points',
+                    bbox=dict(boxstyle='round,pad=0.25', facecolor='#ffffff', edgecolor='#bbbbbb', alpha=0.9))
+    ax.set_title('Pillar 1 vs. 3: Overall Quality (ROUGE-L F1 ↑) vs. Inference Time (Latency ↓)', fontsize=14, fontweight='bold', pad=15)
+    ax.set_xlabel('Wall-Clock Latency per Sample (seconds) → Lower is Faster (↓)', fontsize=11, labelpad=10)
+    ax.set_ylabel('Overall Quality ROUGE-L F1 (%) → Higher is Better (↑)', fontsize=11, labelpad=10)
+    ax.axvspan(0, x.median(), color='#e8f5e9', alpha=0.35, label='High Efficiency Zone', zorder=1)
+    ax.legend(loc='lower right', frameon=True)
+    plt.tight_layout()
+    f1 = os.path.join(PLOTS_DIR, 'quality_vs_inference_latency.png')
+    plt.savefig(f1, bbox_inches='tight')
+    plt.show()
+    print('Saved:', f1)
+
+    # Figure 2: Pillar 1 vs Pillar 2 -> Overall Quality vs. Hallucination Risk
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+    x_hal = df_raw['hallucination_risk_pct'] * 100
+    y_qual = df_raw['overall_quality_rougeL_f1'] * 100
+    ax.scatter(x_hal, y_qual, c=range(len(df_raw)), cmap='coolwarm', s=500, alpha=0.9, edgecolors='black', linewidth=1.5, zorder=3)
+    for i, txt in enumerate(df_raw['model']):
+        ax.annotate(f' {txt.upper()}', (x_hal.iloc[i], y_qual.iloc[i]), fontsize=10, fontweight='bold', xytext=(8, 4), textcoords='offset points',
+                    bbox=dict(boxstyle='round,pad=0.25', facecolor='#ffffff', edgecolor='#bbbbbb', alpha=0.9))
+    ax.set_title('Pillar 1 vs. 2: Overall Quality (ROUGE-L F1 ↑) vs. Hallucination Risk (↓)', fontsize=14, fontweight='bold', pad=15)
+    ax.set_xlabel('Hallucination Risk (% Ungrounded in Source) → Lower is Safer (↓)', fontsize=11, labelpad=10)
+    ax.set_ylabel('Overall Quality ROUGE-L F1 (%) → Higher is Better (↑)', fontsize=11, labelpad=10)
+    ax.axvspan(0, x_hal.median(), color='#e3f2fd', alpha=0.35, label='Safe Grounding Zone', zorder=1)
+    ax.legend(loc='lower left', frameon=True)
+    plt.tight_layout()
+    f2 = os.path.join(PLOTS_DIR, 'quality_vs_hallucination_risk.png')
+    plt.savefig(f2, bbox_inches='tight')
+    plt.show()
+    print('Saved:', f2)
+
+    # Figure 3: Hallucination Risk Breakdown Across Models
+    fig, ax = plt.subplots(figsize=(10, 5), dpi=300)
+    models = [m.upper() for m in df_raw['model']]
+    bar_colors = ['#2a9d8f' if v < df_raw['hallucination_risk_pct'].median() else '#e76f51' for v in df_raw['hallucination_risk_pct']]
+    ax.bar(models, df_raw['hallucination_risk_pct'] * 100, color=bar_colors, edgecolor='black', linewidth=0.6)
+    ax.axhline(df_raw['hallucination_risk_pct'].mean() * 100, color='red', linestyle='--', label=f"Average Risk ({df_raw['hallucination_risk_pct'].mean()*100:.1f}%)")
+    ax.set_title('Pillar 2: Hallucination Risk (% of Claims Ungrounded in Source Abstract ↓)', fontsize=13, fontweight='bold', pad=15)
+    ax.set_ylabel('Ungrounded Token % (Lower is Safer ↓)', fontsize=11)
+    ax.tick_params(axis='x', rotation=20)
+    ax.legend(frameon=True)
+    plt.tight_layout()
+    f3 = os.path.join(PLOTS_DIR, 'hallucination_risk_ranking.png')
+    plt.savefig(f3, bbox_inches='tight')
+    plt.show()
+    print('Saved:', f3)
+
+    # Figure 4: Inference Throughput (Tokens/sec) & Latency Dual Panel
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5), dpi=300)
+    ax1.bar(models, df_raw['wall_clock_latency_sec'], color='#f4a261', edgecolor='black', linewidth=0.6)
+    ax1.set_title('Pillar 3: Wall-Clock Latency (Seconds/Sample ↓)', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Seconds (Lower is Faster ↓)', fontsize=10)
+    ax1.tick_params(axis='x', rotation=25)
+
+    if 'throughput_tokens_per_sec' in df_raw.columns:
+        ax2.bar(models, df_raw['throughput_tokens_per_sec'], color='#2a9d8f', edgecolor='black', linewidth=0.6)
+        ax2.set_title('Pillar 3: Generation Throughput (Tokens/Sec ↑)', fontsize=12, fontweight='bold')
+        ax2.set_ylabel('Tokens per Second (Higher is Better ↑)', fontsize=10)
+        ax2.tick_params(axis='x', rotation=25)
+
+    plt.tight_layout()
+    f4 = os.path.join(PLOTS_DIR, 'inference_speed_latency.png')
+    plt.savefig(f4, bbox_inches='tight')
+    plt.show()
+    print('Saved:', f4)
+
+    print('\n🎉 All 4 non-redundant research figures generated and saved to Drive!')
+
