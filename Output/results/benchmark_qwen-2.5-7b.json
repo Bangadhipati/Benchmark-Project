@@ -1,0 +1,21 @@
+{
+    "overall_quality_rougeL_f1": 0.19867017550752944,
+    "rougeL_precision": 0.18553258442274528,
+    "rougeL_recall": 0.23812691667599184,
+    "f1_score_target": 0.28269140755112354,
+    "precision_target": 0.26224045331490753,
+    "recall_target": 0.33693491857055247,
+    "source_grounding_precision": 0.5948730577260273,
+    "hallucination_risk_pct": 0.4051269422739727,
+    "wall_clock_latency_sec": 3.3119991507500344,
+    "total_wall_clock_sec": 66.23998301500069,
+    "throughput_tokens_per_sec": 28.18539370061734,
+    "model": "qwen-2.5-7b",
+    "model_id": "Qwen/Qwen2.5-1.5B-Instruct",
+    "max_source_length": 512,
+    "max_target_length": 128,
+    "evaluation_samples": 20,
+    "fine_tuning": false,
+    "quantization": "4-bit NF4",
+    "evaluation_type": "Zero-shot inference"
+}

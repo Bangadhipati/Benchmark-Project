@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scientific Highlight Generation: A Three-Pillar Comparative Benchmark on FIRE MixSub-SciHigh</title>
+
+<!-- KaTeX for Mathematical Typography -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: "$$", right: "$$", display: true},
+                {left: "$", right: "$", display: false}
+            ]
+        });
+    });
+</script>
+
+<style>
+    /* ==========================================================================
+       IEEE / Springer / Scopus Style Academic Single-Column Typography
+       ========================================================================== */
+    @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+        --text-primary: #1a1a1a;
+        --text-secondary: #4a4a4a;
+        --text-muted: #6b7280;
+        --accent-color: #1e3a8a;
+        --accent-hover: #1d4ed8;
+        --border-color: #e5e7eb;
+        --bg-alt: #f9fafb;
+        --paper-width: 860px;
+    }
+
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+        font-family: 'Crimson Pro', Georgia, serif;
+        font-size: 1.16rem;
+        line-height: 1.72;
+        color: var(--text-primary);
+        background-color: #f3f4f6;
+        margin: 0;
+        padding: 40px 16px;
+    }
+
+    .paper-container {
+        max-width: var(--paper-width);
+        margin: 0 auto;
+        background-color: #ffffff;
+        padding: 64px 72px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.02);
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+    }
+
+    /* Track / Journal Header */
+    .journal-header {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.84rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        border-bottom: 2px solid var(--accent-color);
+        padding-bottom: 8px;
+        margin-bottom: 32px;
+        display: flex;
+        justify-content: space-between;
+    }
+
+    /* Paper Title */
+    h1.paper-title {
+        font-family: 'Crimson Pro', Georgia, serif;
+        font-size: 2.35rem;
+        font-weight: 700;
+        line-height: 1.25;
+        color: #0f172a;
+        text-align: center;
+        margin-top: 10px;
+        margin-bottom: 24px;
+    }
+
+    /* Author Information */
+    .author-block {
+        font-family: 'Inter', sans-serif;
+        text-align: center;
+        margin-bottom: 32px;
+    }
+
+    .authors {
+        font-size: 1.15rem;
+        font-weight: 600;
+        color: #1e293b;
+        margin-bottom: 8px;
+    }
+
+    .affiliations {
+        font-size: 0.95rem;
+        color: var(--text-secondary);
+        line-height: 1.5;
+        margin-bottom: 12px;
+    }
+
+    .author-meta {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+        margin-top: 8px;
+    }
+
+    .author-meta a {
+        color: var(--accent-hover);
+        text-decoration: none;
+    }
+
+    .orcid-icon {
+        display: inline-block;
+        vertical-align: middle;
+        width: 14px;
+        height: 14px;
+        margin-right: 2px;
+    }
+
+    /* Abstract Box */
+    .abstract-box {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.96rem;
+        line-height: 1.68;
+        background-color: var(--bg-alt);
+        border: 1px solid #e5e7eb;
+        border-left: 4px solid var(--accent-color);
+        padding: 22px 28px;
+        border-radius: 4px;
+        margin: 32px 0;
+    }
+
+    .abstract-title {
+        font-weight: 700;
+        text-transform: uppercase;
+        font-size: 0.88rem;
+        letter-spacing: 0.06em;
+        color: var(--accent-color);
+        margin-bottom: 10px;
+    }
+
+    .keywords {
+        margin-top: 14px;
+        font-size: 0.9rem;
+    }
+
+    .keywords strong {
+        color: #111827;
+    }
+
+    /* Headings */
+    h2 {
+        font-family: 'Inter', sans-serif;
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: #0f172a;
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 6px;
+        margin-top: 48px;
+        margin-bottom: 18px;
+        letter-spacing: -0.01em;
+    }
+
+    h3 {
+        font-family: 'Inter', sans-serif;
+        font-size: 1.12rem;
+        font-weight: 600;
+        color: #1e3a8a;
+        margin-top: 28px;
+        margin-bottom: 12px;
+    }
+
+    p {
+        margin-top: 0;
+        margin-bottom: 18px;
+        text-align: justify;
+        text-justify: inter-word;
+    }
+
+    /* Academic Booktabs Tables */
+    table.booktabs {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 28px 0;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.88rem;
+        line-height: 1.5;
+    }
+
+    table.booktabs caption {
+        caption-side: top;
+        font-weight: 600;
+        text-align: left;
+        margin-bottom: 8px;
+        color: #1e293b;
+        font-size: 0.92rem;
+    }
+
+    table.booktabs thead tr:first-child th {
+        border-top: 2px solid #111827;
+        border-bottom: 1.5px solid #111827;
+        padding: 10px 12px;
+        background-color: #f8fafc;
+        font-weight: 600;
+        text-align: left;
+        color: #0f172a;
+    }
+
+    table.booktabs tbody tr td {
+        padding: 9px 12px;
+        border-bottom: 1px solid #e2e8f0;
+        color: #1e293b;
+    }
+
+    table.booktabs tbody tr:last-child td {
+        border-bottom: 2px solid #111827;
+    }
+
+    table.booktabs tbody tr:hover {
+        background-color: #f8fafc;
+    }
+
+    /* Figures */
+    figure {
+        margin: 36px 0;
+        text-align: center;
+    }
+
+    figure img {
+        max-width: 100%;
+        height: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    figcaption {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.88rem;
+        line-height: 1.5;
+        color: var(--text-secondary);
+        margin-top: 10px;
+        text-align: justify;
+        padding: 0 8px;
+    }
+
+    figcaption strong {
+        color: #0f172a;
+    }
+
+    /* Code & Formulas */
+    pre, code {
+        font-family: 'JetBrains Mono', Consolas, monospace;
+        font-size: 0.88em;
+    }
+
+    p code {
+        background-color: #f1f5f9;
+        padding: 2px 5px;
+        border-radius: 4px;
+        color: #0f172a;
+    }
+
+    .callout {
+        background-color: #eff6ff;
+        border-left: 4px solid #2563eb;
+        padding: 14px 18px;
+        margin: 20px 0;
+        font-size: 0.96rem;
+        font-family: 'Inter', sans-serif;
+        border-radius: 0 4px 4px 0;
+    }
+
+    /* References */
+    ol.references {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.86rem;
+        line-height: 1.6;
+        padding-left: 24px;
+    }
+
+    ol.references li {
+        margin-bottom: 10px;
+        text-align: left;
+    }
+
+    ol.references a {
+        color: var(--accent-hover);
+        text-decoration: none;
+    }
+
+    /* Print Formatting */
+    @media print {
+        body {
+            background-color: #ffffff;
+            padding: 0;
+        }
+        .paper-container {
+            box-shadow: none;
+            border: none;
+            padding: 0;
+            max-width: 100%;
+        }
+        h2, h3 {
+            page-break-after: avoid;
+        }
+        figure, table {
+            page-break-inside: avoid;
+        }
+    }
+</style>
+</head>
+<body>
+
+<div class="paper-container">
+
+    <!-- Track / Context Header -->
+    <div class="journal-header">
+        <span>FIRE MixSub-SciHigh Track Research Evaluation</span>
+        <span>Jadavpur University Internship (2026)</span>
+    </div>
+
+    <!-- Paper Title -->
+    <h1 class="paper-title">
+        Automated Scientific Highlight Generation: A Three-Pillar Comparative Study of Domain-Adapted, General, and Efficient Large Language Models
+    </h1>
+
+    <!-- Author & Affiliation Section -->
+    <div class="author-block">
+        <div class="authors">
+            Debarghya Bhowmick<sup>1,*</sup>, Tohida Rehman<sup>2</sup>
+        </div>
+        <div class="affiliations">
+            <sup>1</sup> Department of Computer Science & Engineering, I. K. Gujral Punjab Technical University, Kapurthala, India<br>
+            <sup>2</sup> Department of Information Technology, Jadavpur University, Kolkata, India
+        </div>
+        <div class="author-meta">
+            <span><strong>Correspondence (*):</strong> <a href="mailto:debarghya.bhowmick@yahoo.com">debarghya.bhowmick@yahoo.com</a></span> |
+            <span><a href="mailto:tohidarehman.it@jadavpuruniversity.in">tohidarehman.it@jadavpuruniversity.in</a></span><br>
+            <span><strong>ORCID IDs:</strong> 
+                <a href="https://orcid.org/0009-0003-0468-8981" target="_blank">0009-0003-0468-8981</a> (D. Bhowmick), 
+                <a href="https://orcid.org/0000-0002-3578-1316" target="_blank">0000-0002-3578-1316</a> (T. Rehman)
+            </span>
+        </div>
+    </div>
+
+    <!-- Abstract -->
+    <div class="abstract-box">
+        <div class="abstract-title">Abstract</div>
+        <p>
+            The exponential expansion of contemporary academic literature imposes an intense cognitive burden on researchers, necessitating automated summarization tools that distill dense paper abstracts into salient, bite-sized scientific highlights. Unlike standard narrative summaries, research highlights require high information density, strict factual fidelity, and structural conciseness. In this investigation, we conduct an extensive empirical benchmark on the <strong>FIRE MixSub-SciHigh</strong> dataset—encompassing 13,825 scientific publications across multi-disciplinary domains—to evaluate four distinct architectural paradigms: (1) <strong>Google Pegasus-PubMed</strong> (specialized Seq2Seq encoder-decoder), (2) <strong>BioMistral-7B</strong> (domain-adapted biomedical causal LLM), (3) <strong>Qwen-2.5-Instruct</strong> (high-efficiency instruction-tuned causal LLM), and (4) <strong>Meta Llama-3.1-8B-Instruct</strong> (frontier general-purpose LLM). To move beyond one-dimensional surface-overlap evaluations, we formulate a holistic <strong>Three-Pillar Evaluation Framework</strong> spanning: (i) Reference Quality and LCS alignment (ROUGE-L F1, Target Lexical F1), (ii) Source Lexical Grounding and Extrinsic Hallucination Risk Proxy ($P_{\text{source}}$, Ungrounded-Token Risk %), and (iii) Inference Efficiency (Wall-Clock Latency per sample, Throughput). Experimental findings reveal distinct performance trade-offs: <strong>BioMistral-7B</strong> establishes decisive factual superiority with <strong>84.44%</strong> vocabulary grounding and a minimal <strong>15.56%</strong> hallucination risk proxy (reducing novel extrinsic vocabulary by over 60% relative to general LLMs). Concurrently, <strong>Qwen-2.5-Instruct</strong> achieves the highest reference quality (<strong>19.87%</strong> ROUGE-L F1, <strong>28.27%</strong> Target F1) while delivering unmatched inference speed (<strong>3.31 s/sample</strong>; <strong>28.19 tokens/sec</strong>), operating 2.4&times; faster than BioMistral and Llama 3.1, and 3.2&times; faster than Pegasus. Finally, we translate these findings into an open-source, interactive dual-engine dashboard (Streamlit and Gradio) equipped with real-time visual token-grounding verification to assist digital libraries and peer-review systems.
+        </p>
+        <div class="keywords">
+            <strong>Keywords:</strong> Scientific Highlight Generation, Natural Language Processing, Large Language Models, FIRE MixSub-SciHigh, Factual Grounding, Hallucination Mitigation, BioMistral, Qwen-2.5.
+        </div>
+    </div>
+
+    <!-- 1. Introduction -->
+    <h2>1. Introduction</h2>
+    <p>
+        In contemporary science and engineering, the volume of scholarly literature published each year exceeds human reading capacity. Digital indexing databases index hundreds of thousands of new articles monthly. While research abstracts have long served as primary syntheses, they frequently contain background context, broad problem motivation, and introductory framing that obscures the underlying experimental breakthrough. To facilitate rapid knowledge discovery, prominent scientific publishers (including Elsevier, Springer Nature, and IEEE) now mandate <strong>Research Highlights</strong>: an author-curated sequence of three to five core, high-impact bullet statements summarizing novel discoveries, empirical findings, and methodological innovations.
+    </p>
+    <p>
+        Automating scientific highlight generation presents distinct challenges compared to standard news or narrative text summarization:
+    </p>
+    <ol>
+        <li><strong>High Information Density & Technical Jargon:</strong> Abstracts encompass domain-specific biochemical nomenclatures, mathematical variables, and complex pharmacological relationships.</li>
+        <li><strong>Severe Penalty for Factual Hallucinations:</strong> In life sciences and clinical medicine, generating an ungrounded or contradictory claim (e.g., claiming a drug reduced mortality when the abstract noted it increased toxicity) can have dangerous real-world consequences.</li>
+        <li><strong>Structural Granularity:</strong> Highlights require discrete bullet points that synthesize disparate quantitative outcomes rather than rephrasing the abstract into a shorter continuous paragraph.</li>
+    </ol>
+    <p>
+        Historically, scientific summarization relied upon supervised Sequence-to-Sequence (Seq2Seq) encoder-decoder transformers such as Pegasus [1] pre-trained with Gap Sentences Generation (GSG) objectives. Recently, the NLP landscape has transitioned to decoder-only Autoregressive Large Language Models (LLMs) possessing billions of parameters [2, 3, 4]. However, whether general-purpose frontier LLMs, domain-specialized foundation models, or lightweight instruction-tuned architectures offer the optimal balance of quality, factual fidelity, and computational runtime remains an open empirical question.
+    </p>
+    <p>
+        <strong>Core Research Contributions:</strong>
+    </p>
+    <ul>
+        <li><strong>A Standardized Multi-Model Benchmark:</strong> We systematically evaluate four distinct architectural families—Pegasus-PubMed, BioMistral-7B, Qwen-2.5-Instruct, and Llama-3.1-8B-Instruct—under strict uniform constraints on the FIRE MixSub-SciHigh corpus.</li>
+        <li><strong>The Three-Pillar Evaluation Framework:</strong> We formulate an evaluation protocol measuring: (1) Reference Quality, (2) Source Lexical Grounding and Extrinsic Risk Proxy, and (3) Inference Latency and Throughput.</li>
+        <li><strong>Identification of Pareto-Optimal Paradigms:</strong> We uncover empirical trade-offs, demonstrating that BioMistral-7B provides peerless factual safety, whereas Qwen-2.5 provides superior generation speed and journal-ready bullet formatting.</li>
+        <li><strong>Interactive Deployment System:</strong> We engineer a complete dual-engine web application (Streamlit and Gradio) featuring live token-level visual hallucination audits for real-time peer review.</li>
+    </ul>
+
+    <!-- 2. Related Work -->
+    <h2>2. Related Work</h2>
+    <p>
+        <strong>Scientific Document Summarization:</strong> Early scientific text summarization focused on extractive methods utilizing graph-based ranking algorithms (e.g., TextRank, LexRank). With the advent of deep contextual embeddings, abstractive summarization gained prominence. Specialized transformer architectures, notably Pegasus-PubMed [1] and SciBERT, were pre-trained on large academic corpora (arXiv and PubMed) utilizing gap-sentence mask filling to mimic human summarization behavior. While effective on continuous text, these models struggle with structured, bullet-delimited highlight syntax.
+    </p>
+    <p>
+        <strong>Domain-Adapted Foundation Models:</strong> Adapting foundation models to specialized verticals has proven critical for technical disciplines. BioMistral [2] demonstrated that initializing from Mistral-7B and continuing self-supervised pre-training on PubMed Central open-access papers significantly improved biomedical reasoning and medical licensing question benchmarks. Concurrently, instruction-tuned architectures such as Qwen-2.5 [3] and Meta Llama 3.1 [4] have demonstrated superior zero-shot prompt following, enabling models to generate structurally constrained outputs without parameter fine-tuning.
+    </p>
+    <p>
+        <strong>Hallucination Detection in Generative NLP:</strong> Generative hallucinations represent a central bottleneck in deploying LLMs. Extrinsic hallucinations—where the model introduces information neither supported nor contradicted by the source—are pervasive in abstractive systems. Prior literature has evaluated factual consistency through entity matching, dependency parsing, and Natural Language Inference (NLI) entailment models. In this work, we deploy normalized set-theoretic lexical precision as an automated proxy to measure the degree of vocabulary overlap directly against the source abstract.
+    </p>
+
+    <!-- 3. Dataset -->
+    <h2>3. The FIRE MixSub-SciHigh Dataset</h2>
+    <p>
+        Our investigation is conducted on the official benchmark corpus released for the <strong>FIRE MixSub-SciHigh Track</strong> (Forum for Information Retrieval Evaluation). The corpus comprises scientific papers encompassing multidisciplinary domains including clinical psychiatry, neuroscience, biomaterials, oncology, and computational informatics.
+    </p>
+
+    <table class="booktabs">
+        <caption>Table 1: Corpus partitions and structural characteristics of the FIRE MixSub-SciHigh benchmark.</caption>
+        <thead>
+            <tr>
+                <th>Dataset Partition</th>
+                <th>File Identifier</th>
+                <th>Document Count</th>
+                <th>Available Features</th>
+                <th>Primary Role in Research Pipeline</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Training Split</strong></td>
+                <td><code>MixSub-SciHigh_train_FIRE.csv</code></td>
+                <td>10,000</td>
+                <td><code>Filename</code>, <code>Abstract</code>, <code>Highlights</code></td>
+                <td>Parameter optimization and QLoRA fine-tuning workflows</td>
+            </tr>
+            <tr>
+                <td><strong>Validation Split</strong></td>
+                <td><code>MixSub-SciHigh_val_FIRE.csv</code></td>
+                <td>1,985</td>
+                <td><code>Filename</code>, <code>Abstract</code>, <code>Highlights</code></td>
+                <td>Three-pillar benchmark evaluation against gold human references</td>
+            </tr>
+            <tr>
+                <td><strong>Masked Test Split</strong></td>
+                <td><code>MixSub-SciHigh_test_FIRE(Masked).csv</code></td>
+                <td>1,840</td>
+                <td><code>Filename</code>, <code>Abstract</code></td>
+                <td>Blind test set inference and competitive submission scoring</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p>
+        The source scientific abstract typically contains between 200 and 350 words, while the reference highlights consist of 3 to 5 discrete sentences / bullet points (averaging 40 to 80 words in aggregate). An illustrative sample pair from the validation split is presented below:
+    </p>
+
+    <div class="callout">
+        <strong>Source Abstract Excerpt:</strong><br>
+        <em>"Standardized developmentally based assessment systems have transformed the capacity to identify transdiagnostic behavioral markers of mental disorder risk in early childhood notably clinically significant irritability... We measured children's facial muscular movement during a mildly frustrating task using automated Facial Action Coding..."</em><br><br>
+        <strong>Author-Written Gold Reference Highlights:</strong><br>
+        <em>"&bull; There is a need for tools that assess child irritability and externalizing behaviors.<br>
+        &bull; We measured childrens facial muscular movement during a mildly frustrating task.<br>
+        &bull; Negative expressions with eye contact differentiated children with clinical problems."</em>
+    </div>
+
+    <!-- 4. Methodology -->
+    <h2>4. The Three-Pillar Evaluation Framework</h2>
+    <p>
+        Conventional summarization research frequently focuses exclusively on ROUGE overlap. However, in scientific production environments, a model scoring high lexical overlap might introduce fabricated medical claims or exhibit impractically high generation latency. To address this, we establish a comprehensive <strong>Three-Pillar Evaluation Framework</strong>:
+    </p>
+
+    <h3>4.1 Pillar 1: Reference Quality (Human Highlight Alignment)</h3>
+    <p>
+        Pillar 1 measures structural and semantic similarity between the model's generated text ($G$) and the author-written gold reference highlight ($R$).
+    </p>
+    <p>
+        <strong>ROUGE-L (Longest Common Subsequence):</strong> Evaluates sentence-level structure by identifying the longest common subsequence of tokens between generated and reference strings, preserving relative token order:
+    </p>
+    $$\text{Precision}_{LCS} = \frac{LCS(G, R)}{|G|}, \qquad \text{Recall}_{LCS} = \frac{LCS(G, R)}{|R|}$$
+    $$\text{ROUGE-L}_{F1} = \frac{2 \cdot \text{Precision}_{LCS} \cdot \text{Recall}_{LCS}}{\text{Precision}_{LCS} + \text{Recall}_{LCS}}$$
+
+    <p>
+        <strong>Target Lexical F1:</strong> To supplement n-gram sequencing, we compute normalized whitespace-separated bag-of-words set overlap after case-folding and punctuation stripping:
+    </p>
+    $$P_{\text{target}} = \frac{|G_{\text{tokens}} \cap R_{\text{tokens}}|}{|G_{\text{tokens}}|}, \qquad R_{\text{target}} = \frac{|G_{\text{tokens}} \cap R_{\text{tokens}}|}{|R_{\text{tokens}}|}$$
+    $$F1_{\text{target}} = \frac{2 \cdot P_{\text{target}} \cdot R_{\text{target}}}{P_{\text{target}} + R_{\text{target}}}$$
+
+    <h3>4.2 Pillar 2: Source Lexical Grounding & Extrinsic Hallucination Risk Proxy</h3>
+    <p>
+        Pillar 2 audits whether the generated text remains anchored in the source abstract ($S$) or invents unverified concepts:
+    </p>
+    <p>
+        <strong>Source Lexical Precision ($P_{\text{source}}$):</strong> The fraction of generated unique vocabulary tokens that directly appear in the source abstract:
+    </p>
+    $$P_{\text{source}} = \frac{|G_{\text{tokens}} \cap S_{\text{tokens}}|}{|G_{\text{tokens}}|}$$
+
+    <p>
+        <strong>Ungrounded-Token Risk Proxy (%):</strong> The complement of source precision, quantifying the proportion of novel, non-abstract vocabulary introduced by the model:
+    </p>
+    $$\text{Risk}_{\text{proxy}} (\%) = (1.0 - P_{\text{source}}) \times 100$$
+    <p>
+        <em>Interpretation:</em> While not an absolute semantic fact-checker, a lower ungrounded proxy indicates that the model strictly preserves the terminology of the abstract rather than extrapolating speculative vocabulary.
+    </p>
+
+    <h3>4.3 Pillar 3: Inference Speed & Deployment Feasibility</h3>
+    <p>
+        Pillar 3 measures wall-clock runtime efficiency under identical hardware conditions:
+    </p>
+    <p>
+        <strong>Mean Generation Latency ($\overline{T}$):</strong> Average wall-clock seconds consumed per document generation pass:
+    </p>
+    $$\overline{T} = \frac{1}{N} \sum_{i=1}^{N} T_i \quad (\text{seconds per sample})$$
+
+    <p>
+        <strong>Sample and Token Throughput:</strong>
+    </p>
+    $$\text{Throughput}_{\text{sample}} = \frac{1}{\overline{T}} \quad (\text{samples/sec}), \qquad \text{Throughput}_{\text{token}} = \frac{\sum \text{Tokens Generated}}{\sum T_i} \quad (\text{tokens/sec})$$
+
+    <!-- 5. Experimental Setup -->
+    <h2>5. Experimental Setup & Benchmarked Models</h2>
+
+    <h3>5.1 Model Architectures Under Study</h3>
+    <ol>
+        <li><strong>Google Pegasus-PubMed (<code>google/pegasus-pubmed</code>):</strong> 568M parameter encoder-decoder transformer pre-trained on scientific biomedical articles using GSG objectives.</li>
+        <li><strong>BioMistral-7B (<code>BioMistral/BioMistral-7B</code>):</strong> 7B parameter causal LLM adapted from Mistral-7B through continuous pre-training on PubMed Central open access corpora.</li>
+        <li><strong>Qwen-2.5-Instruct (<code>Qwen/Qwen2.5-1.5B-Instruct</code> / <code>Qwen2.5-7B</code>):</strong> Advanced instruction-tuned causal LLM developed by Alibaba Cloud, optimized for structured formatting and high-throughput reasoning.</li>
+        <li><strong>Meta Llama-3.1-8B-Instruct (<code>meta-llama/Llama-3.1-8B-Instruct</code>):</strong> 8B parameter flagship open-weights foundation model trained on over 15 trillion tokens with extensive alignment.</li>
+    </ol>
+
+    <h3>5.2 Uniform Experimental Controls</h3>
+    <p>
+        To ensure scientific fairness, identical tokenization ceilings and hardware constraints were enforced across all evaluation runs:
+    </p>
+    <ul>
+        <li><strong>Input Token Ceiling (<code>MAX_SOURCE_LENGTH</code>):</strong> Fixed at <strong>512 tokens</strong> to avoid truncation asymmetry.</li>
+        <li><strong>Output Budget (<code>MAX_TARGET_LENGTH</code>):</strong> Fixed at <strong>128 tokens</strong>, enforcing compact highlight length.</li>
+        <li><strong>Hardware Environment:</strong> NVIDIA Tesla T4 GPU (15.84 GB VRAM) hosted on standard Google Colab environments.</li>
+        <li><strong>Quantization Protocol:</strong> 4-bit NormalFloat4 (NF4) quantization via <code>bitsandbytes</code> with double quantization, reducing causal LLM memory footprints from ~16 GB to under 5.5 GB VRAM without catastrophic performance degradation.</li>
+        <li><strong>Prompt Formatting:</strong> Causal models were guided with a standardized prompt: <em>"You are an expert scientific editor. Generate concise, accurate scientific highlights summarizing the core findings of the provided abstract."</em></li>
+    </ul>
+
+    <!-- 6. Quantitative Results -->
+    <h2>6. Quantitative Results & Comparative Analysis</h2>
+    <p>
+        The consolidated empirical results across all four benchmarked architectures are presented in Table 2, derived from the verified evaluation outputs in <code>master_3pillar_benchmark_comparison.csv</code>:
+    </p>
+
+    <table class="booktabs">
+        <caption>Table 2: Comprehensive Three-Pillar Benchmark Performance on the FIRE MixSub-SciHigh Validation Dataset.</caption>
+        <thead>
+            <tr>
+                <th>Model Architecture</th>
+                <th>Adaptation Mode</th>
+                <th>ROUGE-L F1 (%)</th>
+                <th>Target F1 (%)</th>
+                <th>Source Grounding (%)</th>
+                <th>Ungrounded Risk (%)</th>
+                <th>Mean Latency (s/sample)</th>
+                <th>Sample Throughput (samp/s)</th>
+                <th>Token Speed (tok/s)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Qwen-2.5-Instruct</strong></td>
+                <td>Zero-shot</td>
+                <td><strong>19.87%</strong></td>
+                <td><strong>28.27%</strong></td>
+                <td>59.49%</td>
+                <td>40.51%</td>
+                <td><strong>3.31 s</strong></td>
+                <td><strong>0.302</strong></td>
+                <td><strong>28.19</strong></td>
+            </tr>
+            <tr>
+                <td><strong>BioMistral-7B</strong></td>
+                <td>Zero-shot</td>
+                <td>19.80%</td>
+                <td>27.37%</td>
+                <td><strong>84.44%</strong></td>
+                <td><strong>15.56%</strong></td>
+                <td>8.04 s</td>
+                <td>0.124</td>
+                <td>12.69</td>
+            </tr>
+            <tr>
+                <td><strong>Llama-3.1-8B-Instruct</strong></td>
+                <td>Zero-shot</td>
+                <td>19.04%</td>
+                <td>25.07%</td>
+                <td>53.40%</td>
+                <td>46.60%</td>
+                <td>7.90 s</td>
+                <td>0.127</td>
+                <td>—</td>
+            </tr>
+            <tr>
+                <td><strong>Pegasus-PubMed</strong></td>
+                <td>Seq2Seq</td>
+                <td>16.90%</td>
+                <td>22.32%</td>
+                <td>57.40%</td>
+                <td>42.60%</td>
+                <td>10.56 s</td>
+                <td>0.095</td>
+                <td>9.18</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>6.1 Detailed Pillar-by-Pillar Analysis</h3>
+    <p>
+        <strong>Pillar 1 (Reference Quality):</strong> Autoregressive decoder models systematically outperformed the classical Seq2Seq model (Pegasus-PubMed: 16.90% ROUGE-L) by approximately 3 percentage points. Qwen-2.5-Instruct achieved the highest ROUGE-L F1 (19.87%) and Target F1 (28.27%), closely shadowed by BioMistral-7B (19.80% ROUGE-L F1, 27.37% Target F1). The difference between Qwen and BioMistral is marginal (&Delta; = 0.07%), demonstrating that both models capture the core semantic substance of author highlights with equal proficiency.
+    </p>
+    <p>
+        <strong>Pillar 2 (Factual Grounding & Hallucination Mitigation):</strong> BioMistral-7B demonstrated <strong>unprecedented factual grounding</strong>. An overwhelming <strong>84.44%</strong> of its generated tokens existed verbatim within the source abstract, yielding an ungrounded risk proxy of only <strong>15.56%</strong>. In stark comparison, general foundation models (Llama 3.1: 46.60% risk; Qwen 2.5: 40.51% risk) exhibited ungrounded rates nearly three times higher. This constitutes empirical validation that continued pre-training on specialized biomedical corpora establishes strict boundaries on vocabulary hallucination.
+    </p>
+    <p>
+        <strong>Pillar 3 (Inference Efficiency):</strong> Qwen-2.5-Instruct established complete dominance in computational throughput, generating highlights in <strong>3.31 seconds per sample</strong> at <strong>28.19 tokens/sec</strong>. This is <strong>2.4&times; faster</strong> than BioMistral (8.04 s) and Llama 3.1 (7.90 s), and <strong>3.2&times; faster</strong> than Pegasus (10.56 s). For digital library indexing pipelines processing thousands of papers, Qwen delivers substantial economic and operational advantages.
+    </p>
+
+    <!-- 7. Visual Diagnostic Gallery -->
+    <h2>7. Visual Diagnostic Gallery & Trade-off Analysis</h2>
+    <p>
+        To examine multi-dimensional trade-offs, we generated four publication-quality diagnostic visualizations, illustrated in Figures 1 through 4:
+    </p>
+
+    <figure>
+        <img src="Output/results/plots/quality_vs_inference_latency.png" alt="Figure 1: Quality vs Inference Latency">
+        <figcaption>
+            <strong>Figure 1: Quality vs. Inference Latency (Pillar 1 vs. Pillar 3).</strong> The top-left quadrant represents the optimal operating regime (high ROUGE-L quality and low latency). Qwen-2.5 occupies the ideal position, combining top-tier quality with lowest inference time. BioMistral achieves matching quality but requires ~8.04 seconds per sample. Pegasus-PubMed resides in the suboptimal bottom-right quadrant.
+        </figcaption>
+    </figure>
+
+    <figure>
+        <img src="Output/results/plots/quality_vs_hallucination_risk.png" alt="Figure 2: Quality vs Ungrounded-Token Risk Proxy">
+        <figcaption>
+            <strong>Figure 2: Quality vs. Ungrounded-Token Proxy (Pillar 1 vs. Pillar 2).</strong> Models in the upper-left quadrant combine high quality with minimal risk of introducing unsupported vocabulary. BioMistral-7B stands alone on the far left (15.56% risk proxy), demonstrating superior grounding while matching Qwen in ROUGE-L performance.
+        </figcaption>
+    </figure>
+
+    <figure>
+        <img src="Output/results/plots/hallucination_risk_ranking.png" alt="Figure 3: Source-Grounding Risk Proxy Across Models">
+        <figcaption>
+            <strong>Figure 3: Cross-Model Ranking of Source-Grounding Risk Proxy (Pillar 2).</strong> Lower bars indicate superior factual conservatism. The dashed line denotes the cohort mean (~36.3%). BioMistral is the sole architecture substantially outperforming the mean, whereas Llama 3.1 exhibits the highest proportion of extrinsic terminology.
+        </figcaption>
+    </figure>
+
+    <figure>
+        <img src="Output/results/plots/inference_speed_latency.png" alt="Figure 4: Inference Speed & Latency Comparison">
+        <figcaption>
+            <strong>Figure 4: Inference Speed & Throughput Benchmark (Pillar 3).</strong> Left panel: Mean Latency (seconds per sample; lower is preferred). Right panel: Throughput (samples processed per second; higher is preferred). Qwen-2.5 delivers over 0.30 samples/sec, providing unmatched computational efficiency.
+        </figcaption>
+    </figure>
+
+    <!-- 8. Qualitative Analysis -->
+    <h2>8. Qualitative Analysis & Linguistic Formats</h2>
+    <p>
+        Examining actual predictions across architectures reveals significant linguistic, structural, and stylistic divergences when evaluated on the identical scientific abstract:
+    </p>
+
+    <table class="booktabs">
+        <caption>Table 3: Comparative Qualitative Predictions Generated by Evaluated Architectures on a Validation Sample.</caption>
+        <thead>
+            <tr>
+                <th>Model Architecture</th>
+                <th>Generated Output Excerpt</th>
+                <th>Observed Linguistic & Structural Behavior</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Qwen-2.5-Instruct</strong></td>
+                <td><code>**Highlights:**<br>- Standardized developmental-based assessment systems improve detection of transdiagnostic behavioral markers...<br>- Novel facial expression-...</code></td>
+                <td><strong>Native Academic Highlight Syntax:</strong> Accurately formats output as discrete bullet points adhering to journal guidelines. Excellent readability and information density.</td>
+            </tr>
+            <tr>
+                <td><strong>BioMistral-7B</strong></td>
+                <td><em>"This study aimed to identify facial expressions during frustration that could be used as a marker of psychopathology in young children. Facial expressions were recorded while children completed..."</em></td>
+                <td><strong>Dense Abstractive Clinical Prose:</strong> Highly conservative, formal clinical terminology. Strictly grounded in source vocabulary, though outputs paragraph prose rather than bullet points.</td>
+            </tr>
+            <tr>
+                <td><strong>Llama-3.1-8B-Instruct</strong></td>
+                <td><code>**Novel Facial Expression Assessment Tool Shows Promise in Identifying Early Psychopathology in Children**</code><br><em>A study involving 79 children found that specific facial expressions...</em></td>
+                <td><strong>Editorial / Journalistic Headline:</strong> Produces a news-style bold headline followed by an explanatory paragraph. Highly fluent, but imports creative external framing words.</td>
+            </tr>
+            <tr>
+                <td><strong>Pegasus-PubMed</strong></td>
+                <td><em>"objectiveto test how facial expressions during frustration defined by different facial muscular movements related to individual differences in and externalizing behaviors and discriminated children wi"</em></td>
+                <td><strong>Extractive Concatenation:</strong> Lacks bullet syntax; stitches contiguous source clauses without capitalization or spacing at segment boundaries (e.g., <code>objectiveto</code>).</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <!-- 9. Interactive Demonstration -->
+    <h2>9. System Implementation & Interactive Demonstration</h2>
+    <p>
+        To translate these empirical findings into deployable utility, we constructed an interactive highlight generation system packaged inside the <code>Summarization Dashboard Folder/</code>. The application is implemented in both <strong>Streamlit</strong> (Figure 5) and <strong>Gradio</strong> (Figure 6) utilizing a responsive dual-panel layout:
+    </p>
+    <ul>
+        <li><strong>Left Input Panel:</strong> Allows reviewers to choose between the 4 benchmarked models, select from 10 pre-loaded validation samples across psychiatry, oncology, and biomaterials, or paste custom abstracts.</li>
+        <li><strong>Right Output Panel:</strong> Renders formatted highlights alongside the Three-Pillar Scorecard and features an interactive <strong>Grounding Visualizer</strong> highlighting source-grounded words in green and novel tokens in orange.</li>
+    </ul>
+
+    <figure>
+        <img src="dashboard.png" alt="Figure 5: Streamlit Interactive Highlights Dashboard">
+        <figcaption>
+            <strong>Figure 5: Streamlit Interactive Highlights Dashboard.</strong> User interface displaying model architecture selection on the left and generated highlights, three-pillar scorecard, and token-level grounding visualizer on the right.
+        </figcaption>
+    </figure>
+
+    <figure>
+        <img src="gradio dashboard.png" alt="Figure 6: Gradio Alternative Highlights Dashboard">
+        <figcaption>
+            <strong>Figure 6: Gradio Alternative Highlights Dashboard.</strong> Lightweight, streamlined web interface developed for rapid evaluation and responsive zero-latency cross-model audits.
+        </figcaption>
+    </figure>
+
+    <!-- 10. Discussion -->
+    <h2>10. Discussion & Deployment Decision Matrix</h2>
+    <p>
+        The empirical findings illustrate that no single model strictly dominates across all three pillars. Instead, optimal model selection depends upon operational requirements:
+    </p>
+
+    <table class="booktabs">
+        <caption>Table 4: Deployment Decision Matrix for Automated Scientific Highlight Systems.</caption>
+        <thead>
+            <tr>
+                <th>Operational Priority</th>
+                <th>Recommended Model</th>
+                <th>Empirical Justification</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Clinical Safety & Hallucination Prevention</strong></td>
+                <td><strong>BioMistral-7B</strong></td>
+                <td>84.44% source grounding and minimal 15.56% risk proxy prevent fabricated claims in high-stakes biomedical contexts.</td>
+            </tr>
+            <tr>
+                <td><strong>High-Throughput Publishing & Speed</strong></td>
+                <td><strong>Qwen-2.5-Instruct</strong></td>
+                <td>Generates highlights in 3.31 s (28.19 tok/s) while matching top ROUGE-L quality (19.87%).</td>
+            </tr>
+            <tr>
+                <td><strong>Standard Journal Highlight Syntax</strong></td>
+                <td><strong>Qwen-2.5-Instruct</strong></td>
+                <td>Natively produces formatted bullet points without requiring additional post-processing heuristics.</td>
+            </tr>
+            <tr>
+                <td><strong>Fluency & Broad Multi-Disciplinary Scope</strong></td>
+                <td><strong>Llama-3.1-8B-Instruct</strong></td>
+                <td>Strong general reasoning, though prone to introducing non-abstract synonyms and editorial headlines.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <!-- 11. Limitations -->
+    <h2>11. Limitations & Threats to Validity</h2>
+    <ol>
+        <li><strong>Lexical Proxy vs. Semantic Entailment:</strong> Set-based lexical precision evaluates token overlap rather than deep semantic entailment. A clinically valid synonym (e.g., substituting <em>"neoplasm"</em> for <em>"tumor"</em>) is penalized as ungrounded, whereas a negated claim using identical tokens receives high overlap. Future work should integrate claim-level Natural Language Inference (NLI).</li>
+        <li><strong>Hardware Bounds & Quantization:</strong> Models were quantized to 4-bit NormalFloat4 (NF4) to accommodate standard 16 GB VRAM GPUs. While NF4 preserves foundational performance, slight perplexity degradation relative to full 16-bit precision is expected.</li>
+        <li><strong>Zero-Shot Evaluation:</strong> Benchmark passes evaluated zero-shot instruction capabilities. Supervised parameter-efficient fine-tuning (QLoRA) on the full 10,000 training set is expected to further enhance ROUGE-L scores.</li>
+    </ol>
+
+    <!-- 12. Conclusion -->
+    <h2>12. Conclusion & Future Directions</h2>
+    <p>
+        In this research, we formulated and executed a rigorous <strong>Three-Pillar Comparative Benchmark</strong> on the FIRE MixSub-SciHigh dataset, comparing classical Seq2Seq and modern causal LLMs across Quality, Factual Grounding, and Inference Speed. Our findings demonstrate that <strong>BioMistral-7B</strong> provides unparalleled factual safety (84.44% grounding, 15.56% risk proxy), making it the premier choice for clinical and biomedical document synthesis. Simultaneously, <strong>Qwen-2.5-Instruct</strong> proves optimal for large-scale production, delivering top ROUGE-L quality (19.87%), native bullet syntax, and 2.4&times; faster execution (3.31 s/sample).
+    </p>
+    <p>
+        Future directions include conducting full QLoRA fine-tuning across the 10,000 training pairs, submitting blind predictions on the 1,840 masked test set, and deploying automated claim-level entailment verification via LLM-as-a-judge frameworks.
+    </p>
+
+    <!-- Declarations -->
+    <h2>Declarations & Competing Interests</h2>
+    <p>
+        <strong>Funding:</strong> This research was supported through the academic resources of the Department of Information Technology, Jadavpur University, and the Department of Computer Science & Engineering, I.K. Gujral Punjab Technical University.<br>
+        <strong>Conflict of Interest:</strong> The authors declare that they have no competing financial or personal interests that could influence the work reported in this paper.<br>
+        <strong>Data Availability:</strong> Benchmark datasets are accessible through the official FIRE MixSub-SciHigh shared task portal. Evaluation scripts and dashboard applications are maintained in the project codebase.
+    </p>
+
+    <!-- Acknowledgements -->
+    <h2>Acknowledgements</h2>
+    <p>
+        The authors express sincere gratitude to the faculty and computational facilities of the <strong>Department of Information Technology, Jadavpur University</strong>, and the <strong>Department of Computer Science & Engineering, I. K. Gujral Punjab Technical University</strong>. We also acknowledge the organizers of the <strong>FIRE MixSub-SciHigh Track</strong> for providing benchmark corpora, and the open-source Hugging Face community for providing foundational model weights.
+    </p>
+
+    <!-- References -->
+    <h2>References</h2>
+    <ol class="references">
+        <li>Zhang, J., Zhao, Y., Saleh, M., & Liu, P. (2020). PEGASUS: Pre-training with Extracted Gap-Sentences for Abstractive Summarization. <em>Proceedings of the 37th International Conference on Machine Learning (ICML)</em>, PMLR 119:11328-11339.</li>
+        <li>Labrak, Y., Bazoge, A., Morin, E., Gourraud, P. A., Rouvier, M., & Dufour, R. (2024). BioMistral: A Collection of Open-Source Pre-trained Large Language Models for Medical Domains. <em>arXiv preprint arXiv:2402.10373</em>.</li>
+        <li>Yang, A., Yu, B., Li, C., Liu, D., et al. (2024). Qwen2.5 Technical Report. <em>Qwen Team, Alibaba Group</em>.</li>
+        <li>Dubey, A., Jauhri, A., Pandey, A., et al. (2024). The Llama 3 Herd of Models. <em>arXiv preprint arXiv:2407.21783</em>, Meta AI.</li>
+        <li>Lin, C. Y. (2004). ROUGE: A Package for Automatic Evaluation of Summaries. <em>Text Summarization Branches Out: Proceedings of the ACL-04 Workshop</em>, pp. 74–81.</li>
+        <li>Dettmers, T., Pagnoni, A., Holtzman, A., & Zettlemoyer, L. (2023). QLoRA: Efficient Finetuning of Quantized LLMs. <em>Advances in Neural Information Processing Systems (NeurIPS)</em>, 36:10088–10115.</li>
+        <li>Forum for Information Retrieval Evaluation (FIRE). (2026). MixSub-SciHigh: Multi-disciplinary Scientific Highlight Generation Track. <em>FIRE Shared Tasks</em>.</li>
+        <li>Lewis, M., Liu, Y., Goyal, N., et al. (2020). BART: Denoising Sequence-to-Sequence Pre-training for Natural Language Generation, Translation, and Comprehension. <em>Proceedings of the 58th Annual Meeting of the ACL</em>, pp. 7871–7880.</li>
+        <li>Maynez, J., Narayan, S., Bohnet, B., & McDonald, R. (2020). On Faithfulness and Factuality in Abstractive Summarization. <em>Proceedings of the 58th Annual Meeting of the ACL</em>, pp. 1906–1919.</li>
+        <li>Hu, E. J., Shen, Y., Wallis, P., et al. (2022). LoRA: Low-Rank Adaptation of Large Language Models. <em>International Conference on Learning Representations (ICLR)</em>.</li>
+    </ol>
+
+</div>
+
+</body>
+</html>
+

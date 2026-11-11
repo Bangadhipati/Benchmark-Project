@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scientific Highlight Generation Benchmark - Project Report</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: "$$", right: "$$", display: true},
+                {left: "$", right: "$", display: false}
+            ]
+        });
+    });
+</script>
+<style>
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        line-height: 1.68;
+        color: #1f2937;
+        max-width: 920px;
+        margin: 40px auto;
+        padding: 0 24px;
+        background-color: #ffffff;
+    }
+    h1 {
+        color: #1e3a8a;
+        font-size: 2.1rem;
+        border-bottom: 2px solid #e5e7eb;
+        padding-bottom: 12px;
+        margin-top: 24px;
+    }
+    h2 {
+        color: #1e40af;
+        font-size: 1.45rem;
+        border-bottom: 1px solid #e5e7eb;
+        padding-bottom: 8px;
+        margin-top: 36px;
+    }
+    h3 {
+        color: #1d4ed8;
+        font-size: 1.15rem;
+        margin-top: 24px;
+    }
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 22px 0;
+        font-size: 0.95rem;
+    }
+    th, td {
+        border: 1px solid #d1d5db;
+        padding: 10px 14px;
+        text-align: left;
+    }
+    th {
+        background-color: #f3f4f6;
+        font-weight: 600;
+        color: #111827;
+    }
+    tr:nth-child(even) {
+        background-color: #f9fafb;
+    }
+    blockquote {
+        border-left: 4px solid #3b82f6;
+        margin: 20px 0;
+        padding: 12px 20px;
+        background-color: #eff6ff;
+        color: #1e3a8a;
+        border-radius: 0 6px 6px 0;
+    }
+    code {
+        background-color: #f3f4f6;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: 'Consolas', 'Courier New', monospace;
+        font-size: 0.9em;
+    }
+    pre {
+        background-color: #1f2937;
+        color: #f9fafb;
+        padding: 16px;
+        border-radius: 8px;
+        overflow-x: auto;
+    }
+    pre code {
+        background-color: transparent;
+        color: inherit;
+        padding: 0;
+    }
+    img {
+        max-width: 100%;
+        height: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        margin: 18px 0;
+        display: block;
+    }
+    hr {
+        border: 0;
+        border-top: 1px solid #e5e7eb;
+        margin: 36px 0;
+    }
+    @media print {
+        body {
+            max-width: 100%;
+            margin: 0;
+            padding: 15mm;
+            font-size: 11pt;
+        }
+        h1, h2, h3 {
+            page-break-after: avoid;
+        }
+        table, pre, img, blockquote {
+            page-break-inside: avoid;
+        }
+    }
+</style>
+</head>
+<body>
+<h1 id="automated-scientific-highlight-generation-a-three-pillar-comparative-study-of-domain-adapted-general-and-efficient-large-language-models">Automated Scientific Highlight Generation: A Three-Pillar Comparative Study of Domain-Adapted, General, and Efficient Large Language Models</h1>
+<p><strong>A Research Internship Project Report</strong><br />
+<em>Submitted in partial fulfillment of the requirements for the Research Internship</em><br />
+<em>(June 2026 – November 2026)</em></p>
+<p><strong>Submitted by:</strong><br />
+<strong>Debarghya Bhowmick</strong><br />
+Department of Computer Science &amp; Engineering<br />
+I. K. Gujral Punjab Technical University, Kapurthala, Punjab, India<br />
+Email: <code>debarghya.bhowmick@yahoo.com</code> | ORCID: <code>0009-0003-0468-8981</code></p>
+<p><strong>Under the Guidance and Supervision of:</strong><br />
+<strong>Dr. Tohida Rehman</strong><br />
+Assistant Professor, Department of Information Technology<br />
+Jadavpur University, Kolkata, West Bengal, India<br />
+Email: <code>tohidarehman.it@jadavpuruniversity.in</code> | ORCID: <code>0000-0002-3578-1316</code></p>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-certificate">Certificate</a></li>
+<li><a href="#2-acknowledgement">Acknowledgement</a></li>
+<li><a href="#3-abstract">Abstract</a></li>
+<li><a href="#4-introduction">Introduction</a></li>
+<li><a href="#5-system-requirements">System Requirements</a></li>
+<li><a href="#6-tech-stack">Tech Stack</a></li>
+<li><a href="#7-system-design">System Design</a></li>
+<li><a href="#8-implementation">Implementation</a></li>
+<li><a href="#9-source-code">Source Code</a></li>
+<li><a href="#10-screenshots">Screenshots</a></li>
+<li><a href="#11-conclusion--future-scope">Conclusion &amp; Future Scope</a></li>
+<li><a href="#12-references">References</a></li>
+</ol>
+<hr />
+<h2 id="1-certificate">1. Certificate</h2>
+<div class="codehilite"><pre><span></span><code><span class="o">========================================================================================</span>
+<span class="w">                               </span><span class="nx">DEPARTMENT</span><span class="w"> </span><span class="nx">OF</span><span class="w"> </span><span class="nx">INFORMATION</span><span class="w"> </span><span class="nx">TECHNOLOGY</span>
+<span class="w">                                       </span><span class="nx">JADAVPUR</span><span class="w"> </span><span class="nx">UNIVERSITY</span>
+<span class="w">                                     </span><span class="nx">KOLKATA</span><span class="p">,</span><span class="w"> </span><span class="nx">WEST</span><span class="w"> </span><span class="nx">BENGAL</span><span class="p">,</span><span class="w"> </span><span class="nx">INDIA</span>
+<span class="o">========================================================================================</span>
+
+<span class="w">                                       </span><span class="nx">CERTIFICATE</span>
+
+<span class="nx">This</span><span class="w"> </span><span class="k">is</span><span class="w"> </span><span class="nx">to</span><span class="w"> </span><span class="nx">certify</span><span class="w"> </span><span class="nx">that</span><span class="w"> </span><span class="nx">the</span><span class="w"> </span><span class="nx">project</span><span class="w"> </span><span class="nx">report</span><span class="w"> </span><span class="nx">entitled</span><span class="p">:</span>
+
+<span class="w">      </span><span class="s">&quot;AUTOMATED SCIENTIFIC HIGHLIGHT GENERATION: A THREE-PILLAR COMPARATIVE STUDY</span>
+<span class="s">      OF DOMAIN-ADAPTED, GENERAL, AND EFFICIENT LARGE LANGUAGE MODELS&quot;</span>
+
+<span class="k">is</span><span class="w"> </span><span class="nx">a</span><span class="w"> </span><span class="nx">bona</span><span class="w"> </span><span class="nx">fide</span><span class="w"> </span><span class="nx">record</span><span class="w"> </span><span class="nx">of</span><span class="w"> </span><span class="nx">independent</span><span class="w"> </span><span class="nx">research</span><span class="w"> </span><span class="nx">work</span><span class="w"> </span><span class="nx">carried</span><span class="w"> </span><span class="nx">out</span><span class="w"> </span><span class="nx">by</span><span class="p">:</span>
+
+<span class="w">                                  </span><span class="nx">DEBARGHYA</span><span class="w"> </span><span class="nx">BHOWMICK</span>
+<span class="w">               </span><span class="nx">Department</span><span class="w"> </span><span class="nx">of</span><span class="w"> </span><span class="nx">Computer</span><span class="w"> </span><span class="nx">Science</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="nx">Engineering</span>
+<span class="w">               </span><span class="nx">I</span><span class="p">.</span><span class="w"> </span><span class="nx">K</span><span class="p">.</span><span class="w"> </span><span class="nx">Gujral</span><span class="w"> </span><span class="nx">Punjab</span><span class="w"> </span><span class="nx">Technical</span><span class="w"> </span><span class="nx">University</span><span class="p">,</span><span class="w"> </span><span class="nx">Kapurthala</span><span class="p">,</span><span class="w"> </span><span class="nx">India</span>
+
+<span class="nx">under</span><span class="w"> </span><span class="nx">my</span><span class="w"> </span><span class="nx">supervision</span><span class="w"> </span><span class="k">and</span><span class="w"> </span><span class="nx">mentorship</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="nx">the</span><span class="w"> </span><span class="nx">Department</span><span class="w"> </span><span class="nx">of</span><span class="w"> </span><span class="nx">Information</span><span class="w"> </span><span class="nx">Technology</span><span class="p">,</span><span class="w"> </span><span class="nx">Jadavpur</span>
+<span class="nx">University</span><span class="p">,</span><span class="w"> </span><span class="nx">during</span><span class="w"> </span><span class="nx">the</span><span class="w"> </span><span class="nx">period</span><span class="w"> </span><span class="nx">from</span><span class="w"> </span><span class="nx">June</span><span class="w"> </span><span class="mi">2026</span><span class="w"> </span><span class="nx">to</span><span class="w"> </span><span class="nx">November</span><span class="w"> </span><span class="mi">2026</span><span class="p">.</span>
+
+<span class="nx">The</span><span class="w"> </span><span class="nx">empirical</span><span class="w"> </span><span class="nx">benchmark</span><span class="w"> </span><span class="nx">results</span><span class="p">,</span><span class="w"> </span><span class="nx">implementation</span><span class="w"> </span><span class="nx">pipelines</span><span class="p">,</span><span class="w"> </span><span class="nx">mathematical</span><span class="w"> </span><span class="nx">formulations</span><span class="p">,</span>
+<span class="k">and</span><span class="w"> </span><span class="nx">interactive</span><span class="w"> </span><span class="nx">dashboard</span><span class="w"> </span><span class="nx">systems</span><span class="w"> </span><span class="nx">presented</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="nx">this</span><span class="w"> </span><span class="nx">report</span><span class="w"> </span><span class="nx">represent</span><span class="w"> </span><span class="nx">the</span><span class="w"> </span><span class="nx">student</span><span class="err">&#39;</span><span class="nx">s</span><span class="w"> </span><span class="nx">authentic</span>
+<span class="nx">work</span><span class="w"> </span><span class="k">and</span><span class="w"> </span><span class="nx">have</span><span class="w"> </span><span class="k">not</span><span class="w"> </span><span class="nx">been</span><span class="w"> </span><span class="nx">submitted</span><span class="w"> </span><span class="nx">elsewhere</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="nx">any</span><span class="w"> </span><span class="nx">other</span><span class="w"> </span><span class="nx">degree</span><span class="p">,</span><span class="w"> </span><span class="nx">diploma</span><span class="p">,</span><span class="w"> </span><span class="k">or</span><span class="w"> </span><span class="nx">certificate</span><span class="p">.</span>
+
+
+
+
+<span class="nx">____________________________________</span><span class="w">                  </span><span class="nx">____________________________________</span>
+<span class="nx">Dr</span><span class="p">.</span><span class="w"> </span><span class="nx">Tohida</span><span class="w"> </span><span class="nx">Rehman</span><span class="w">                                     </span><span class="nx">Head</span><span class="w"> </span><span class="nx">of</span><span class="w"> </span><span class="nx">the</span><span class="w"> </span><span class="nx">Department</span>
+<span class="nx">Assistant</span><span class="w"> </span><span class="nx">Professor</span><span class="w">                                   </span><span class="nx">Department</span><span class="w"> </span><span class="nx">of</span><span class="w"> </span><span class="nx">Information</span><span class="w"> </span><span class="nx">Technology</span>
+<span class="nx">Department</span><span class="w"> </span><span class="nx">of</span><span class="w"> </span><span class="nx">Information</span><span class="w"> </span><span class="nx">Technology</span><span class="w">                  </span><span class="nx">Jadavpur</span><span class="w"> </span><span class="nx">University</span><span class="p">,</span><span class="w"> </span><span class="nx">Kolkata</span>
+<span class="nx">Jadavpur</span><span class="w"> </span><span class="nx">University</span><span class="p">,</span><span class="w"> </span><span class="nx">Kolkata</span><span class="p">,</span><span class="w"> </span><span class="nx">India</span>
+
+<span class="nx">Date</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="nx">th</span><span class="w"> </span><span class="nx">November</span><span class="w"> </span><span class="mi">2026</span><span class="w">                              </span><span class="nx">Place</span><span class="p">:</span><span class="w"> </span><span class="nx">Kolkata</span><span class="p">,</span><span class="w"> </span><span class="nx">India</span>
+<span class="o">========================================================================================</span>
+</code></pre></div>
+
+<hr />
+<h2 id="2-acknowledgement">2. Acknowledgement</h2>
+<p>I would like to express my deepest gratitude and heartfelt appreciation to my research supervisor, <strong>Dr. Tohida Rehman</strong>, Assistant Professor in the Department of Information Technology at <strong>Jadavpur University</strong>, Kolkata. Her constant guidance, insightful academic feedback, technical encouragement, and rigorous standards of experimental design have been instrumental throughout the tenure of this research internship. Working under her supervision has been an invaluable learning experience that has profoundly enriched my understanding of Natural Language Processing and applied artificial intelligence.</p>
+<p>I express my sincere thanks to the <strong>Department of Information Technology at Jadavpur University</strong> for providing the computational ecosystem, laboratory infrastructure, and academic platform necessary to conduct this benchmarking research.</p>
+<p>I also extend my sincere gratitude to the faculty and leadership of the <strong>Department of Computer Science &amp; Engineering at I. K. Gujral Punjab Technical University</strong>, Kapurthala, for their continuous academic encouragement and support during my degree program.</p>
+<p>Furthermore, I acknowledge the organizers of the <strong>FIRE MixSub-SciHigh Track</strong> for curating and releasing the multi-disciplinary scientific highlight benchmark dataset, and the open-source Hugging Face, PyTorch, and open-weights AI research communities for making pre-trained model weights accessible.</p>
+<p>Finally, I thank my parents, family, and peers for their endless patience, support, and motivation throughout this project.</p>
+<p><strong>Debarghya Bhowmick</strong><br />
+Department of Computer Science &amp; Engineering<br />
+I. K. Gujral Punjab Technical University</p>
+<hr />
+<h2 id="3-abstract">3. Abstract</h2>
+<p>Reading and synthesizing academic literature has become increasingly difficult due to the publication of thousands of scientific papers every single day. While research abstracts summarize the general narrative of a study, leading scientific journals (such as Elsevier, Springer Nature, and IEEE) now require authors to submit <strong>Research Highlights</strong>---a concise set of three to five bullet points that communicate the novel findings and quantitative outcomes of a paper.</p>
+<p>In this research internship project carried out under the supervision of Dr. Tohida Rehman at Jadavpur University, we investigate how modern artificial intelligence and Large Language Models (LLMs) can automatically read dense scientific abstracts and generate accurate, concise research highlights. Using a large public dataset of 13,825 academic papers from the <strong>FIRE MixSub-SciHigh</strong> corpus, we evaluate four distinct model architectures:
+1. <strong>Google Pegasus-PubMed</strong> (a classical Sequence-to-Sequence scientific summarizer),
+2. <strong>BioMistral-7B</strong> (a medical-domain specialized causal LLM),
+3. <strong>Qwen-2.5-Instruct</strong> (a lightweight, highly efficient instruction-tuned causal LLM), and
+4. <strong>Meta Llama-3.1-8B-Instruct</strong> (a premier general-purpose open foundation model).</p>
+<p>To provide a rigorous evaluation beyond traditional word-overlap scores, we established a <strong>Three-Pillar Evaluation Framework</strong>:
+- <strong>Pillar 1 (Quality):</strong> Measuring similarity to human-written gold highlights using ROUGE-L F1 and Target Lexical F1.
+- <strong>Pillar 2 (Safety &amp; Grounding):</strong> Auditing whether the model sticks to the source abstract using Source Lexical Precision ($P_{\text{source}}$) and Ungrounded-Token Risk Proxy ($1 - P_{\text{source}}$).
+- <strong>Pillar 3 (Inference Efficiency):</strong> Measuring wall-clock latency per paper and generation throughput (tokens and samples per second).</p>
+<p>Our findings demonstrate that <strong>BioMistral-7B</strong> is the safest model for medical and clinical literature, achieving <strong>84.44% vocabulary grounding</strong> and an ungrounded risk proxy of only <strong>15.56%</strong> (reducing extrinsic hallucinated vocabulary by over 60% compared to general LLMs). Simultaneously, <strong>Qwen-2.5-Instruct</strong> achieved the highest overall quality (<strong>19.87%</strong> ROUGE-L F1) and produced native journal bullet points while running at <strong>3.31 seconds per paper</strong> (<strong>28.19 tokens/sec</strong>), operating over 2.4 times faster than BioMistral and Llama, and 3.2 times faster than Pegasus. Finally, we deployed these models into an open-source, interactive web dashboard (implemented in both Streamlit and Gradio) featuring a live token-level visual grounding auditor.</p>
+<hr />
+<h2 id="4-introduction">4. Introduction</h2>
+<h3 id="41-background-and-motivation">4.1 Background and Motivation</h3>
+<p>Scientific research is expanding at an unprecedented rate. Every year, millions of academic articles are published across medicine, engineering, biology, and computer science. For doctors, researchers, and students, keeping up with this flood of literature is physically impossible. Although paper abstracts summarize the general context of an article, they often dedicate significant space to introductory motivation, historical framing, and generalized descriptions.</p>
+<p>To help readers quickly identify novel breakthroughs, premier academic publishers have introduced <strong>Research Highlights</strong>. Highlights are short, bulleted statements summarizing the core experimental findings, novel methodologies, and quantitative results of a study. An expert can read these highlights in twenty to thirty seconds and immediately decide whether the paper is relevant to their work.</p>
+<p>Manually writing highlights is time-consuming. Automating highlight generation using Natural Language Processing (NLP) can dramatically accelerate scientific literature discovery, aid digital libraries in indexing papers, and make complex technical findings accessible to the broader public.</p>
+<h3 id="42-challenges-in-scientific-highlight-generation">4.2 Challenges in Scientific Highlight Generation</h3>
+<p>Unlike summarizing daily news or narrative stories, scientific highlight generation presents three unique hurdles:
+1. <strong>Complex Scientific Jargon:</strong> Papers are filled with chemical names, biomedical acronyms, mathematical symbols, and clinical trial statistics that cannot be simplified carelessly.
+2. <strong>Severe Penalty for Hallucination:</strong> In scientific and medical contexts, an artificial intelligence system that fabricates an unsupported claim (e.g., claiming a drug reduced mortality when the study actually reported it increased toxicity) can cause serious harm.
+3. <strong>Structured Bullet Salience:</strong> Highlights require discrete, high-density bullet points that capture only the novel findings rather than a continuous narrative paragraph.</p>
+<h3 id="43-research-objectives">4.3 Research Objectives</h3>
+<p>The primary objectives of this internship project are:
+- To systematically benchmark four diverse artificial intelligence architectures across classical Seq2Seq, domain-adapted LLMs, general foundation models, and lightweight instruction models.
+- To enforce strict uniform experimental controls (512 token input ceiling, 128 token output limit, and 4-bit NF4 quantization on an NVIDIA Tesla T4 GPU) to guarantee scientifically fair comparisons.
+- To formulate and implement a <strong>Three-Pillar Evaluation Framework</strong> balancing Reference Quality, Factual Grounding, and Inference Efficiency.
+- To build a fully functioning interactive web dashboard (with Streamlit and Gradio) featuring a live visual grounding auditor that highlights source-grounded words in green and novel vocabulary in orange.</p>
+<hr />
+<h2 id="5-system-requirements">5. System Requirements</h2>
+<p>The system requirements necessary to develop, benchmark, and deploy the highlight generation models and interactive applications are categorized into hardware and software components below.</p>
+<h3 id="51-hardware-requirements">5.1 Hardware Requirements</h3>
+<ul>
+<li><strong>Processor (CPU):</strong> Multi-core 64-bit x86 processor (Intel Core i5/i7/i9 8th Gen+ or AMD Ryzen 5/7/9), minimum 4 physical cores.</li>
+<li><strong>System Memory (RAM):</strong> Minimum 16 GB of DDR4/DDR5 system RAM (32 GB recommended for large dataset preprocessing).</li>
+<li><strong>Graphics Processing Unit (GPU):</strong></li>
+<li><em>Minimum:</em> NVIDIA GPU with at least 15 GB of Video RAM (e.g., NVIDIA Tesla T4 in Google Colab).</li>
+<li><em>Recommended for full precision:</em> NVIDIA A100 (40/80 GB) or RTX 3090/4090 (24 GB VRAM).</li>
+<li><strong>Storage:</strong> Minimum 25 GB of free solid-state drive (SSD) storage space for housing the FIRE dataset CSVs, model weight shards, quantized adapter checkpoints, and diagnostic plot outputs.</li>
+<li><strong>Display Resolution:</strong> Standard 1920 $\times$ 1080 display for reviewing the dashboard UI and visual diagnostic plots.</li>
+</ul>
+<h3 id="52-software-requirements">5.2 Software Requirements</h3>
+<ul>
+<li><strong>Operating System:</strong> Windows 10/11 (64-bit) or Ubuntu Linux 20.04/22.04 LTS.</li>
+<li><strong>Runtime Environment:</strong> Python version 3.10 or higher.</li>
+<li><strong>CUDA &amp; GPU Drivers:</strong> NVIDIA CUDA Toolkit version 11.8 or 12.x with corresponding cuDNN libraries.</li>
+<li><strong>Development &amp; Notebook Tools:</strong> Google Colab, Jupyter Notebook, Visual Studio Code.</li>
+<li><strong>Package Manager:</strong> <code>pip</code> (Python Package Installer).</li>
+<li><strong>Web Browsers:</strong> Google Chrome, Microsoft Edge, or Mozilla Firefox (for accessing the dashboard and printable reports).</li>
+</ul>
+<hr />
+<h2 id="6-tech-stack">6. Tech Stack</h2>
+<p>The technologies, frameworks, and libraries utilized throughout this project are detailed below:</p>
+<div class="codehilite"><pre><span></span><code><span class="err">┌────────────────────────────────────────────────────────────────────────────────────────┐</span>
+<span class="err">│</span><span class="w">                                   </span><span class="n">PROJECT</span><span class="w"> </span><span class="n">TECH</span><span class="w"> </span><span class="n">STACK</span><span class="w">                                   </span><span class="err">│</span>
+<span class="err">├──────────────────────┬──────────────────────┬──────────────────────────────────────────┤</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Layer</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">Category</span><span class="w">     </span><span class="err">│</span><span class="w"> </span><span class="n">Technology</span><span class="w">           </span><span class="err">│</span><span class="w"> </span><span class="n">Role</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">Project</span><span class="w">                          </span><span class="err">│</span>
+<span class="err">├──────────────────────┼──────────────────────┼──────────────────────────────────────────┤</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Core</span><span class="w"> </span><span class="n">Language</span><span class="w">        </span><span class="err">│</span><span class="w"> </span><span class="n">Python</span><span class="w"> </span><span class="mf">3.10</span><span class="o">+</span><span class="w">         </span><span class="err">│</span><span class="w"> </span><span class="n">Primary</span><span class="w"> </span><span class="n">implementation</span><span class="w"> </span><span class="n">language</span><span class="w">          </span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Deep</span><span class="w"> </span><span class="n">Learning</span><span class="w"> </span><span class="n">Engine</span><span class="w"> </span><span class="err">│</span><span class="w"> </span><span class="n">PyTorch</span><span class="w"> </span><span class="mf">2.</span><span class="n">x</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">CUDA</span><span class="w">   </span><span class="err">│</span><span class="w"> </span><span class="n">Tensor</span><span class="w"> </span><span class="n">computation</span><span class="w"> </span><span class="ow">and</span><span class="w"> </span><span class="n">GPU</span><span class="w"> </span><span class="n">acceleration</span><span class="w">  </span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">LLM</span><span class="w"> </span><span class="n">Architecture</span><span class="w">     </span><span class="err">│</span><span class="w"> </span><span class="n">Hugging</span><span class="w"> </span><span class="n">Face</span><span class="w"> </span><span class="n">Transformers</span><span class="err">│</span><span class="w"> </span><span class="n">Model</span><span class="w"> </span><span class="n">loading</span><span class="p">,</span><span class="w"> </span><span class="n">pipelines</span><span class="p">,</span><span class="w"> </span><span class="n">tokenizers</span><span class="w"> </span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Quantization</span><span class="w">         </span><span class="err">│</span><span class="w"> </span><span class="n">BitsAndBytes</span><span class="w"> </span><span class="p">(</span><span class="n">NF4</span><span class="p">)</span><span class="w">   </span><span class="err">│</span><span class="w"> </span><span class="mi">4</span><span class="o">-</span><span class="n">bit</span><span class="w"> </span><span class="n">NormalFloat4</span><span class="w"> </span><span class="n">memory</span><span class="w"> </span><span class="n">reduction</span><span class="w">      </span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Parameter</span><span class="w"> </span><span class="n">Adaptation</span><span class="w"> </span><span class="err">│</span><span class="w"> </span><span class="n">PEFT</span><span class="w"> </span><span class="p">(</span><span class="n">LoRA</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">QLoRA</span><span class="p">)</span><span class="w">  </span><span class="err">│</span><span class="w"> </span><span class="n">Low</span><span class="o">-</span><span class="n">Rank</span><span class="w"> </span><span class="n">Adaptation</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">fine</span><span class="o">-</span><span class="n">tuning</span><span class="w">      </span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Acceleration</span><span class="w">         </span><span class="err">│</span><span class="w"> </span><span class="n">Accelerate</span><span class="w">           </span><span class="err">│</span><span class="w"> </span><span class="n">Device</span><span class="w"> </span><span class="n">placement</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">mixed</span><span class="w"> </span><span class="n">precision</span><span class="w"> </span><span class="p">(</span><span class="n">FP16</span><span class="p">)</span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Evaluation</span><span class="w"> </span><span class="n">Engine</span><span class="w">    </span><span class="err">│</span><span class="w"> </span><span class="n">Rouge</span><span class="o">-</span><span class="n">Score</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">Regex</span><span class="w">  </span><span class="err">│</span><span class="w"> </span><span class="n">ROUGE</span><span class="o">-</span><span class="n">L</span><span class="w"> </span><span class="n">LCS</span><span class="w"> </span><span class="n">calculation</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">lexical</span><span class="w"> </span><span class="n">audits</span><span class="w"> </span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Data</span><span class="w"> </span><span class="n">Processing</span><span class="w">      </span><span class="err">│</span><span class="w"> </span><span class="n">Pandas</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">NumPy</span><span class="w">       </span><span class="err">│</span><span class="w"> </span><span class="n">CSV</span><span class="w"> </span><span class="n">dataset</span><span class="w"> </span><span class="n">ingestion</span><span class="w"> </span><span class="ow">and</span><span class="w"> </span><span class="n">vector</span><span class="w"> </span><span class="n">math</span><span class="w">    </span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Plotting</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">Graphics</span><span class="w">  </span><span class="err">│</span><span class="w"> </span><span class="n">Matplotlib</span><span class="w">           </span><span class="err">│</span><span class="w"> </span><span class="n">Publication</span><span class="o">-</span><span class="n">grade</span><span class="w"> </span><span class="n">diagnostic</span><span class="w"> </span><span class="n">charts</span><span class="w">      </span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Frontend</span><span class="w"> </span><span class="n">Dashboard</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="err">│</span><span class="w"> </span><span class="n">Streamlit</span><span class="w">            </span><span class="err">│</span><span class="w"> </span><span class="n">Rich</span><span class="w"> </span><span class="n">interactive</span><span class="w"> </span><span class="n">multi</span><span class="o">-</span><span class="n">tab</span><span class="w"> </span><span class="n">web</span><span class="w"> </span><span class="n">dashboard</span><span class="w"> </span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Frontend</span><span class="w"> </span><span class="n">Dashboard</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="err">│</span><span class="w"> </span><span class="n">Gradio</span><span class="w">               </span><span class="err">│</span><span class="w"> </span><span class="n">Lightweight</span><span class="w"> </span><span class="n">responsive</span><span class="w"> </span><span class="n">evaluation</span><span class="w"> </span><span class="n">UI</span><span class="w">     </span><span class="err">│</span>
+<span class="err">│</span><span class="w"> </span><span class="n">Mathematical</span><span class="w"> </span><span class="n">Output</span><span class="w">  </span><span class="err">│</span><span class="w"> </span><span class="n">KaTeX</span><span class="w">                </span><span class="err">│</span><span class="w"> </span><span class="n">In</span><span class="o">-</span><span class="n">browser</span><span class="w"> </span><span class="n">LaTeX</span><span class="w"> </span><span class="n">mathematical</span><span class="w"> </span><span class="n">rendering</span><span class="w">  </span><span class="err">│</span>
+<span class="err">└──────────────────────┴──────────────────────┴──────────────────────────────────────────┘</span>
+</code></pre></div>
+
+<hr />
+<h2 id="7-system-design">7. System Design</h2>
+<h3 id="71-overall-architectural-pipeline">7.1 Overall Architectural Pipeline</h3>
+<p>The system design follows a modular three-stage architecture: (1) Data Ingestion &amp; Normalization, (2) Quantized Generative Inference, and (3) Three-Pillar Metric &amp; Grounding Evaluation.</p>
+<div class="codehilite"><pre><span></span><code>┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                              SYSTEM ARCHITECTURAL PIPELINE                             │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+                                           │
+                                           ▼
+             ┌───────────────────────────────────────────────────────────┐
+             │               STAGE 1: INPUT PREPARATION                  │
+             │  • Source Scientific Abstract Ingested                    │
+             │  • Tokenization &amp; Strict Truncation (MAX_SOURCE = 512)   │
+             │  • Prompt Formatting with System Persona Instruction      │
+             └───────────────────────────────────────────────────────────┘
+                                           │
+                                           ▼
+             ┌───────────────────────────────────────────────────────────┐
+             │               STAGE 2: GENERATIVE INFERENCE               │
+             │  • 4-Bit NF4 Quantized LLM (BitsAndBytes)                 │
+             │  • Causal Decoding with Generation Ceiling (MAX_TARGET = 128)│
+             │  • Wall-Clock Latency &amp; Token Speed Recorded              │
+             └───────────────────────────────────────────────────────────┘
+                                           │
+                                           ▼
+             ┌───────────────────────────────────────────────────────────┐
+             │            STAGE 3: THREE-PILLAR EVALUATION ENGINE        │
+             │  • Pillar 1: ROUGE-L LCS &amp; Target Lexical F1 Overlap      │
+             │  • Pillar 2: Source Lexical Precision &amp; Ungrounded Risk   │
+             │  • Pillar 3: Latency (sec/sample) &amp; Throughput (tok/sec)  │
+             └───────────────────────────────────────────────────────────┘
+                                           │
+                                           ▼
+             ┌───────────────────────────────────────────────────────────┐
+             │               STAGE 4: PRESENTATION &amp; AUDITING            │
+             │  • Streamlit &amp; Gradio Interactive Dashboards              │
+             │  • Real-Time Visual Grounding Auditor (Green/Orange)      │
+             │  • High-Resolution Diagnostic Trade-Off Plots             │
+             └───────────────────────────────────────────────────────────┘
+</code></pre></div>
+
+<h3 id="72-the-three-pillar-mathematical-formulation">7.2 The Three-Pillar Mathematical Formulation</h3>
+<p>The evaluation framework is formulated mathematically as follows:</p>
+<h4 id="pillar-1-reference-quality">Pillar 1: Reference Quality</h4>
+<p>$$\text{Precision}<em>{LCS} = \frac{LCS(G, R)}{|G|}, \qquad \text{Recall}</em>{LCS} = \frac{LCS(G, R)}{|R|}$$
+$$ROUGE\text{-}L_{F1} = \frac{2 \times \text{Precision}<em>{LCS} \times \text{Recall}</em>{LCS}}{\text{Precision}<em>{LCS} + \text{Recall}</em>{LCS}}$$
+$$P_{\text{target}} = \frac{|G \cap R|}{|G|}, \qquad R_{\text{target}} = \frac{|G \cap R|}{|R|}, \qquad F1_{\text{target}} = \frac{2 \times P_{\text{target}} \times R_{\text{target}}}{P_{\text{target}} + R_{\text{target}}}$$</p>
+<h4 id="pillar-2-factual-grounding-hallucination-risk">Pillar 2: Factual Grounding &amp; Hallucination Risk</h4>
+<p>$$P_{\text{source}} = \frac{|G \cap S|}{|G|}$$
+$$\text{Ungrounded-Token Risk Proxy (\%)} = (1.0 - P_{\text{source}}) \times 100$$</p>
+<h4 id="pillar-3-runtime-efficiency">Pillar 3: Runtime Efficiency</h4>
+<p>$$\text{Mean Latency} = \frac{1}{N} \sum_{i=1}^{N} T_i \quad (\text{seconds per paper})$$
+$$\text{Throughput}<em>{\text{sample}} = \frac{1}{\overline{T}} \quad (\text{samples/sec}), \qquad \text{Throughput}</em>{\text{token}} = \frac{\sum \text{Generated Tokens}}{\sum T_i} \quad (\text{tokens/sec})$$</p>
+<hr />
+<h2 id="8-implementation">8. Implementation</h2>
+<h3 id="81-dataset-description-and-partitioning">8.1 Dataset Description and Partitioning</h3>
+<p>The experiments were conducted using the official <strong>FIRE MixSub-SciHigh</strong> shared task dataset:
+- <strong>Training Set (<code>MixSub-SciHigh_train_FIRE.csv</code>):</strong> 10,000 papers with source abstracts and author highlights.
+- <strong>Validation Set (<code>MixSub-SciHigh_val_FIRE.csv</code>):</strong> 1,985 papers with gold reference highlights used for all evaluation metrics.
+- <strong>Masked Test Set (<code>MixSub-SciHigh_test_FIRE(Masked).csv</code>):</strong> 1,840 papers with abstracts only for blind evaluation.</p>
+<h3 id="82-models-evaluated">8.2 Models Evaluated</h3>
+<p>Four distinct model architectures were evaluated under uniform parameters:
+1. <strong>Google Pegasus-PubMed (<code>google/pegasus-pubmed</code>):</strong> 568M parameter encoder-decoder model pre-trained on PubMed articles using Gap Sentences Generation.
+2. <strong>BioMistral-7B (<code>BioMistral/BioMistral-7B</code>):</strong> 7B parameter causal LLM adapted from Mistral-7B by continuing pre-training on PubMed Central open access papers.
+3. <strong>Qwen-2.5-Instruct (<code>Qwen/Qwen2.5-1.5B-Instruct</code> / <code>7B</code>):</strong> Lightweight, high-efficiency instruction-tuned causal LLM optimized for structured reasoning.
+4. <strong>Meta Llama-3.1-8B-Instruct (<code>meta-llama/Llama-3.1-8B-Instruct</code>):</strong> Meta's premier open foundation model trained on over 15 trillion multi-domain tokens.</p>
+<h3 id="83-master-benchmark-performance-results">8.3 Master Benchmark Performance Results</h3>
+<p>The empirical results across all three pillars are summarized in Table 1 below:</p>
+<table>
+<thead>
+<tr>
+<th>Model Architecture</th>
+<th style="text-align: center;">Adaptation Mode</th>
+<th style="text-align: center;">ROUGE-L F1 (%)</th>
+<th style="text-align: center;">Target Lexical F1 (%)</th>
+<th style="text-align: center;">Source Grounding (%)</th>
+<th style="text-align: center;">Ungrounded Risk (%)</th>
+<th style="text-align: center;">Mean Latency (s/sample)</th>
+<th style="text-align: center;">Sample Throughput (samp/s)</th>
+<th style="text-align: center;">Generation Speed (tok/s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Qwen-2.5-Instruct</strong></td>
+<td style="text-align: center;">Zero-shot (4-bit)</td>
+<td style="text-align: center;"><strong>19.87%</strong></td>
+<td style="text-align: center;"><strong>28.27%</strong></td>
+<td style="text-align: center;">59.49%</td>
+<td style="text-align: center;">40.51%</td>
+<td style="text-align: center;"><strong>3.31 s</strong></td>
+<td style="text-align: center;"><strong>0.302</strong></td>
+<td style="text-align: center;"><strong>28.19</strong></td>
+</tr>
+<tr>
+<td><strong>BioMistral-7B</strong></td>
+<td style="text-align: center;">Zero-shot (4-bit)</td>
+<td style="text-align: center;">19.80%</td>
+<td style="text-align: center;">27.37%</td>
+<td style="text-align: center;"><strong>84.44%</strong></td>
+<td style="text-align: center;"><strong>15.56%</strong></td>
+<td style="text-align: center;">8.04 s</td>
+<td style="text-align: center;">0.124</td>
+<td style="text-align: center;">12.69</td>
+</tr>
+<tr>
+<td><strong>Llama-3.1-8B-Instruct</strong></td>
+<td style="text-align: center;">Zero-shot (4-bit)</td>
+<td style="text-align: center;">19.04%</td>
+<td style="text-align: center;">25.07%</td>
+<td style="text-align: center;">53.40%</td>
+<td style="text-align: center;">46.60%</td>
+<td style="text-align: center;">7.90 s</td>
+<td style="text-align: center;">0.127</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td><strong>Pegasus-PubMed</strong></td>
+<td style="text-align: center;">Seq2Seq Baseline</td>
+<td style="text-align: center;">16.90%</td>
+<td style="text-align: center;">22.32%</td>
+<td style="text-align: center;">57.40%</td>
+<td style="text-align: center;">42.60%</td>
+<td style="text-align: center;">10.56 s</td>
+<td style="text-align: center;">0.095</td>
+<td style="text-align: center;">9.18</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9-source-code">9. Source Code</h2>
+<p>Below are the core, fully verified Python source code implementations of the benchmarking framework and interactive dashboard.</p>
+<h3 id="91-three-pillar-metric-calculation-engine">9.1 Three-Pillar Metric Calculation Engine</h3>
+<p>This script cleans the text, calculates ROUGE-L with stemming, computes bag-of-words target overlap, and determines source lexical precision and ungrounded risk.</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rouge_score</span><span class="w"> </span><span class="kn">import</span> <span class="n">rouge_scorer</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">clean_tokenize</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Tokenize and normalize input text into lowercase alphanumeric tokens.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\b[a-zA-Z0-9]+(?:&#39;[a-zA-Z0-9]+)?\b&quot;</span><span class="p">,</span> <span class="n">text</span><span class="o">.</span><span class="n">lower</span><span class="p">())</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">compute_pillars_for_sample</span><span class="p">(</span><span class="n">gen_text</span><span class="p">,</span> <span class="n">src_text</span><span class="p">,</span> <span class="n">tgt_text</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute lexical grounding and target alignment for a single prediction.&quot;&quot;&quot;</span>
+    <span class="n">gen_tokens</span> <span class="o">=</span> <span class="n">clean_tokenize</span><span class="p">(</span><span class="n">gen_text</span><span class="p">)</span>
+    <span class="n">src_tokens</span> <span class="o">=</span> <span class="n">clean_tokenize</span><span class="p">(</span><span class="n">src_text</span><span class="p">)</span>
+    <span class="n">tgt_tokens</span> <span class="o">=</span> <span class="n">clean_tokenize</span><span class="p">(</span><span class="n">tgt_text</span><span class="p">)</span>
+
+    <span class="n">gen_counts</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">gen_tokens</span><span class="p">)</span>
+    <span class="n">src_counts</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">src_tokens</span><span class="p">)</span>
+    <span class="n">tgt_counts</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">tgt_tokens</span><span class="p">)</span>
+
+    <span class="n">total_gen</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">gen_counts</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="n">total_tgt</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">tgt_counts</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+
+    <span class="c1"># Pillar 2: Source Grounding Precision &amp; Ungrounded Risk Proxy</span>
+    <span class="n">overlap_src</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">((</span><span class="n">gen_counts</span> <span class="o">&amp;</span> <span class="n">src_counts</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="n">precision_src</span> <span class="o">=</span> <span class="p">(</span><span class="n">overlap_src</span> <span class="o">/</span> <span class="n">total_gen</span><span class="p">)</span> <span class="k">if</span> <span class="n">total_gen</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mf">0.0</span>
+    <span class="n">hallucination_risk</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">-</span> <span class="n">precision_src</span>  <span class="c1"># Fraction of novel tokens</span>
+
+    <span class="c1"># Pillar 1: Target Reference Overlap</span>
+    <span class="n">overlap_tgt</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">((</span><span class="n">gen_counts</span> <span class="o">&amp;</span> <span class="n">tgt_counts</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="n">precision_tgt</span> <span class="o">=</span> <span class="p">(</span><span class="n">overlap_tgt</span> <span class="o">/</span> <span class="n">total_gen</span><span class="p">)</span> <span class="k">if</span> <span class="n">total_gen</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mf">0.0</span>
+    <span class="n">recall_tgt</span> <span class="o">=</span> <span class="p">(</span><span class="n">overlap_tgt</span> <span class="o">/</span> <span class="n">total_tgt</span><span class="p">)</span> <span class="k">if</span> <span class="n">total_tgt</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mf">0.0</span>
+    <span class="n">f1_tgt</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">precision_tgt</span> <span class="o">*</span> <span class="n">recall_tgt</span> <span class="o">/</span> <span class="p">(</span><span class="n">precision_tgt</span> <span class="o">+</span> <span class="n">recall_tgt</span><span class="p">))</span> <span class="k">if</span> <span class="p">(</span><span class="n">precision_tgt</span> <span class="o">+</span> <span class="n">recall_tgt</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mf">0.0</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;hallucination_risk&#39;</span><span class="p">:</span> <span class="n">hallucination_risk</span><span class="p">,</span>
+        <span class="s1">&#39;precision_src&#39;</span><span class="p">:</span> <span class="n">precision_src</span><span class="p">,</span>
+        <span class="s1">&#39;precision_tgt&#39;</span><span class="p">:</span> <span class="n">precision_tgt</span><span class="p">,</span>
+        <span class="s1">&#39;recall_tgt&#39;</span><span class="p">:</span> <span class="n">recall_tgt</span><span class="p">,</span>
+        <span class="s1">&#39;f1_tgt&#39;</span><span class="p">:</span> <span class="n">f1_tgt</span>
+    <span class="p">}</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">evaluate_core_benchmarks</span><span class="p">(</span><span class="n">predictions</span><span class="p">,</span> <span class="n">sources</span><span class="p">,</span> <span class="n">references</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Run full three-pillar evaluation across a dataset batch.&quot;&quot;&quot;</span>
+    <span class="n">scorer</span> <span class="o">=</span> <span class="n">rouge_scorer</span><span class="o">.</span><span class="n">RougeScorer</span><span class="p">([</span><span class="s1">&#39;rougeL&#39;</span><span class="p">],</span> <span class="n">use_stemmer</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">rl_f1_list</span><span class="p">,</span> <span class="n">rl_p_list</span><span class="p">,</span> <span class="n">rl_r_list</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[],</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">pred</span><span class="p">,</span> <span class="n">ref</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">predictions</span><span class="p">,</span> <span class="n">references</span><span class="p">):</span>
+        <span class="n">score</span> <span class="o">=</span> <span class="n">scorer</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">ref</span><span class="p">,</span> <span class="n">pred</span><span class="p">)</span>
+        <span class="n">rl_f1_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">score</span><span class="p">[</span><span class="s1">&#39;rougeL&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">fmeasure</span><span class="p">)</span>
+        <span class="n">rl_p_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">score</span><span class="p">[</span><span class="s1">&#39;rougeL&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">precision</span><span class="p">)</span>
+        <span class="n">rl_r_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">score</span><span class="p">[</span><span class="s1">&#39;rougeL&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">recall</span><span class="p">)</span>
+
+    <span class="n">sample_metrics</span> <span class="o">=</span> <span class="p">[</span><span class="n">compute_pillars_for_sample</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">r</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">predictions</span><span class="p">,</span> <span class="n">sources</span><span class="p">,</span> <span class="n">references</span><span class="p">)]</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;rougeL_f1&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">rl_f1_list</span><span class="p">)),</span>
+        <span class="s1">&#39;rougeL_precision&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">rl_p_list</span><span class="p">)),</span>
+        <span class="s1">&#39;rougeL_recall&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">rl_r_list</span><span class="p">)),</span>
+        <span class="s1">&#39;target_lexical_f1&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">([</span><span class="n">x</span><span class="p">[</span><span class="s1">&#39;f1_tgt&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">sample_metrics</span><span class="p">])),</span>
+        <span class="s1">&#39;source_lexical_precision&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">([</span><span class="n">x</span><span class="p">[</span><span class="s1">&#39;precision_src&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">sample_metrics</span><span class="p">])),</span>
+        <span class="s1">&#39;hallucination_risk_pct&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">([</span><span class="n">x</span><span class="p">[</span><span class="s1">&#39;hallucination_risk&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">sample_metrics</span><span class="p">]))</span> <span class="o">*</span> <span class="mf">100.0</span>
+    <span class="p">}</span>
+</code></pre></div>
+
+<h3 id="92-model-loading-with-4-bit-nf4-quantization">9.2 Model Loading with 4-Bit NF4 Quantization</h3>
+<p>This script illustrates how large causal models were loaded on a single 16 GB GPU using <code>bitsandbytes</code>.</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">AutoTokenizer</span><span class="p">,</span> <span class="n">AutoModelForCausalLM</span><span class="p">,</span> <span class="n">BitsAndBytesConfig</span>
+
+<span class="n">MODEL_ID</span> <span class="o">=</span> <span class="s2">&quot;BioMistral/BioMistral-7B&quot;</span>
+
+<span class="c1"># Configure 4-bit NormalFloat4 quantization</span>
+<span class="n">bnb_config</span> <span class="o">=</span> <span class="n">BitsAndBytesConfig</span><span class="p">(</span>
+    <span class="n">load_in_4bit</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">bnb_4bit_quant_type</span><span class="o">=</span><span class="s2">&quot;nf4&quot;</span><span class="p">,</span>
+    <span class="n">bnb_4bit_compute_dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float16</span><span class="p">,</span>
+    <span class="n">bnb_4bit_use_double_quant</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="c1"># Load tokenizer and model within 5.5 GB VRAM</span>
+<span class="n">tokenizer</span> <span class="o">=</span> <span class="n">AutoTokenizer</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="n">MODEL_ID</span><span class="p">)</span>
+<span class="k">if</span> <span class="n">tokenizer</span><span class="o">.</span><span class="n">pad_token</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">tokenizer</span><span class="o">.</span><span class="n">pad_token</span> <span class="o">=</span> <span class="n">tokenizer</span><span class="o">.</span><span class="n">eos_token</span>
+
+<span class="n">model</span> <span class="o">=</span> <span class="n">AutoModelForCausalLM</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span>
+    <span class="n">MODEL_ID</span><span class="p">,</span>
+    <span class="n">quantization_config</span><span class="o">=</span><span class="n">bnb_config</span><span class="p">,</span>
+    <span class="n">device_map</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">torch_dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float16</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Model loaded successfully in 4-bit precision!&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="93-streamlit-interactive-dashboard-core-apppy-excerpt">9.3 Streamlit Interactive Dashboard Core (<code>app.py</code> Excerpt)</h3>
+<p>This code demonstrates the interactive token-level grounding visualizer and multi-model layout.</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">streamlit</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">st</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">highlight_grounding_html</span><span class="p">(</span><span class="n">gen_text</span><span class="p">,</span> <span class="n">src_text</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Audit each generated word: green if in abstract, orange if novel.&quot;&quot;&quot;</span>
+    <span class="n">src_tokens</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\b[a-zA-Z0-9]+\b&quot;</span><span class="p">,</span> <span class="n">src_text</span><span class="o">.</span><span class="n">lower</span><span class="p">()))</span>
+    <span class="n">words</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\S+|\s+&quot;</span><span class="p">,</span> <span class="n">gen_text</span><span class="p">)</span>
+    <span class="n">html_parts</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">words</span><span class="p">:</span>
+        <span class="n">clean_w</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^\w]&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">w</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">clean_w</span><span class="p">:</span>
+            <span class="n">html_parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">w</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">clean_w</span> <span class="ow">in</span> <span class="n">src_tokens</span><span class="p">:</span>
+            <span class="n">html_parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;&lt;span style=&quot;background-color: #dcfce7; color: #166534; padding: 2px 4px; border-radius: 4px;&quot;&gt;</span><span class="si">{</span><span class="n">w</span><span class="si">}</span><span class="s1">&lt;/span&gt;&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">html_parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;&lt;span style=&quot;background-color: #ffedd5; color: #9a3412; padding: 2px 4px; border-radius: 4px; font-weight: 500;&quot;&gt;</span><span class="si">{</span><span class="n">w</span><span class="si">}</span><span class="s1">&lt;/span&gt;&#39;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">html_parts</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="10-screenshots">10. Screenshots</h2>
+<p>The benchmark analysis and interactive application are supported by six high-resolution visual figures.</p>
+<h3 id="figure-1-pillar-1-vs-pillar-3-quality-vs-inference-latency">Figure 1: Pillar 1 vs. Pillar 3 — Quality vs. Inference Latency</h3>
+<p><img alt="Figure 1: Quality vs Inference Latency" src="Output/results/plots/quality_vs_inference_latency.png" /><br />
+<em>Figure 1: Plots ROUGE-L F1 quality against generation latency in seconds per sample. The optimal operating regime is the top-left corner (high quality, low latency), which is occupied by Qwen-2.5-Instruct.</em></p>
+<h3 id="figure-2-pillar-1-vs-pillar-2-quality-vs-ungrounded-token-risk-proxy">Figure 2: Pillar 1 vs. Pillar 2 — Quality vs. Ungrounded-Token Risk Proxy</h3>
+<p><img alt="Figure 2: Quality vs Ungrounded Token Risk Proxy" src="Output/results/plots/quality_vs_hallucination_risk.png" /><br />
+<em>Figure 2: Illustrates highlight quality against hallucination risk proxy. BioMistral-7B stands alone on the far left (15.56% risk), demonstrating superior factual grounding while matching top quality.</em></p>
+<h3 id="figure-3-pillar-2-source-grounding-risk-proxy-ranking-across-models">Figure 3: Pillar 2 — Source-Grounding Risk Proxy Ranking Across Models</h3>
+<p><img alt="Figure 3: Hallucination Risk Ranking" src="Output/results/plots/hallucination_risk_ranking.png" /><br />
+<em>Figure 3: Cross-model ranking of ungrounded vocabulary risk. Lower bars indicate fewer novel words. BioMistral is the only model well below the cohort average line.</em></p>
+<h3 id="figure-4-pillar-3-inference-speed-and-throughput-benchmark">Figure 4: Pillar 3 — Inference Speed and Throughput Benchmark</h3>
+<p><img alt="Figure 4: Inference Speed and Latency Comparison" src="Output/results/plots/inference_speed_latency.png" /><br />
+<em>Figure 4: Dual-panel benchmark comparing Mean Latency (seconds per paper; left) and Throughput (papers per second; right). Qwen-2.5 delivers over 0.30 papers/sec.</em></p>
+<h3 id="figure-5-streamlit-interactive-highlights-dashboard-ui">Figure 5: Streamlit Interactive Highlights Dashboard UI</h3>
+<p><img alt="Figure 5: Streamlit Interactive Highlights Dashboard" src="dashboard.png" /><br />
+<em>Figure 5: Full user interface of the live Streamlit interactive dashboard, illustrating model selection on the left panel, and generated highlights, three-pillar scorecard, and token-level grounding visualizer on the right panel.</em></p>
+<h3 id="figure-6-gradio-lightweight-alternative-dashboard-ui">Figure 6: Gradio Lightweight Alternative Dashboard UI</h3>
+<p><img alt="Figure 6: Gradio Alternative Highlights Dashboard" src="gradio dashboard.png" /><br />
+<em>Figure 6: Full user interface of the alternative Gradio dashboard developed for rapid cross-model evaluations and responsive zero-latency testing.</em></p>
+<hr />
+<h2 id="11-conclusion-future-scope">11. Conclusion &amp; Future Scope</h2>
+<h3 id="111-conclusion">11.1 Conclusion</h3>
+<p>In this research internship project carried out under the supervision of <strong>Dr. Tohida Rehman</strong> at <strong>Jadavpur University</strong>, we established an empirical Three-Pillar Benchmark for automated scientific highlight generation. Our findings demonstrate clear architectural insights:
+- <strong>For High-Stakes Factual Reliability:</strong> <strong>BioMistral-7B</strong> is the premier choice. Its specialized biomedical pre-training achieves <strong>84.44% source grounding</strong> and keeps the ungrounded risk proxy to just <strong>15.56%</strong>, preventing fabricated clinical claims.
+- <strong>For Production Speed &amp; Journal Formatting:</strong> <strong>Qwen-2.5-Instruct</strong> is the overall champion. It delivers the highest ROUGE-L score (<strong>19.87%</strong>), natively formats output into structured bullet points, and generates highlights in only <strong>3.31 seconds per paper</strong> (over 2.4 times faster than competing models).
+- <strong>Practical Deliverables:</strong> We translated our findings into two interactive web applications (Streamlit and Gradio) featuring real-time visual token grounding audits to help researchers and digital publishers summarize papers safely.</p>
+<h3 id="112-future-scope">11.2 Future Scope</h3>
+<p>Building directly upon the foundations established in this internship, the recommended next steps include:
+1. <strong>Full QLoRA Fine-Tuning:</strong> Conducting full parameter-efficient fine-tuning on the complete 10,000 training papers in <code>MixSub-SciHigh_train_FIRE.csv</code> for 3 epochs using low-rank adapters (<code>peft</code>), which is expected to push ROUGE-L scores beyond 25–30%.
+2. <strong>Blind Test Set Submission:</strong> Generating predictions across all 1,840 papers in <code>MixSub-SciHigh_test_FIRE(Masked).csv</code> using the optimized Qwen and BioMistral pipelines for official shared task submission.
+3. <strong>Automated Claim Entailment (LLM-as-a-Judge):</strong> Expanding Pillar 2 beyond set-based lexical overlap by integrating Natural Language Inference (NLI) models (e.g., DeBERTa-v3) to verify sentence-level logical entailment.
+4. <strong>Multi-Document Highlight Synthesis:</strong> Extending the pipeline to read multiple related papers on a topic and generate unified comparative research highlights.</p>
+<hr />
+<h2 id="12-references">12. References</h2>
+<ol>
+<li><strong>Zhang, J., Zhao, Y., Saleh, M., &amp; Liu, P.</strong> (2020). PEGASUS: Pre-training with Extracted Gap-Sentences for Abstractive Summarization. <em>Proceedings of the 37th International Conference on Machine Learning (ICML)</em>, PMLR 119:11328-11339.</li>
+<li><strong>Labrak, Y., Bazoge, A., Morin, E., Gourraud, P. A., Rouvier, M., &amp; Dufour, R.</strong> (2024). BioMistral: A Collection of Open-Source Pre-trained Large Language Models for Medical Domains. <em>arXiv preprint arXiv:2402.10373</em>.</li>
+<li><strong>Yang, A., Yu, B., Li, C., Liu, D., et al.</strong> (2024). Qwen2.5 Technical Report. <em>Qwen Team, Alibaba Group</em>.</li>
+<li><strong>Dubey, A., Jauhri, A., Pandey, A., et al.</strong> (2024). The Llama 3 Herd of Models. <em>arXiv preprint arXiv:2407.21783</em>, Meta AI.</li>
+<li><strong>Lin, C.-Y.</strong> (2004). ROUGE: A Package for Automatic Evaluation of Summaries. <em>Text Summarization Branches Out: Proceedings of the ACL-04 Workshop</em>, pp. 74–81.</li>
+<li><strong>Dettmers, T., Pagnoni, A., Holtzman, A., &amp; Zettlemoyer, L.</strong> (2023). QLoRA: Efficient Finetuning of Quantized LLMs. <em>Advances in Neural Information Processing Systems (NeurIPS)</em>, 36:10088–10115.</li>
+<li><strong>Maynez, J., Narayan, S., Bohnet, B., &amp; McDonald, R.</strong> (2020). On Faithfulness and Factuality in Abstractive Summarization. <em>Proceedings of the 58th Annual Meeting of the ACL</em>, pp. 1906–1919.</li>
+<li><strong>Lewis, M., Liu, Y., Goyal, N., et al.</strong> (2020). BART: Denoising Sequence-to-Sequence Pre-training for Natural Language Generation, Translation, and Comprehension. <em>Proceedings of the 58th Annual Meeting of the ACL</em>, pp. 7871–7880.</li>
+<li><strong>Hu, E. J., Shen, Y., Wallis, P., et al.</strong> (2022). LoRA: Low-Rank Adaptation of Large Language Models. <em>International Conference on Learning Representations (ICLR)</em>.</li>
+<li><strong>FIRE Task Committee.</strong> (2026). Overview of the FIRE Scientific Document Understanding and Summarization Track. <em>Forum for Information Retrieval Evaluation Working Notes</em>.</li>
+</ol>
+<hr />
+<div class="codehilite"><pre><span></span><code><span class="o">========================================================================================</span>
+                      <span class="kr">END</span> <span class="kr">OF</span> <span class="n">PROJECT</span> <span class="n">REPORT</span> <span class="p">|</span> <span class="n">JADAVPUR</span> <span class="n">UNIVERSITY</span>
+<span class="o">========================================================================================</span>
+</code></pre></div>
+</body>
+</html>

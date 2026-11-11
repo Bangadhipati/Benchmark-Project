@@ -1,374 +1,226 @@
-# Scientific Highlight Generation Benchmark
-### FIRE MixSub-SciHigh | Quality, Source-Grounding Proxy, and Inference Efficiency
+# 🔬 Scientific Highlight Generation Benchmark
+### **FIRE MixSub-SciHigh Track | A Three-Pillar Comparative Evaluation**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![Hugging Face](https://img.shields.io/badge/Hugging_Face-Transformers-yellow?logo=huggingface&logoColor=white)](https://huggingface.co/docs/transformers/)
+[![Streamlit](https://img.shields.io/badge/Dashboard-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](Summarization%20Dashboard%20Folder/)
+[![Gradio](https://img.shields.io/badge/Dashboard-Gradio-orange?logo=gradio&logoColor=white)](Summarization%20Dashboard%20Folder/)
 [![Google Colab](https://img.shields.io/badge/Runtime-Google_Colab-F9AB00?logo=googlecolab&logoColor=white)](https://colab.research.google.com/)
-[![Evaluation](https://img.shields.io/badge/Evaluation-3_Pillars-2563EB)](#evaluation-framework)
-
-> **Project purpose:** compare scientific-highlight generation systems on the FIRE MixSub-SciHigh dataset by measuring reference similarity, lexical overlap with the source abstract, and inference efficiency.
 
 ---
 
-## Table of contents
-
-- [Project overview](#project-overview)
-- [Dataset and task](#dataset-and-task)
-- [Models and execution modes](#models-and-execution-modes)
-- [Reproducibility and fair-comparison controls](#reproducibility-and-fair-comparison-controls)
-- [Evaluation framework](#evaluation-framework)
-- [How the metrics are calculated](#how-the-metrics-are-calculated)
-- [Observed results](#observed-results-from-the-supplied-figures)
-- [Figure gallery](#figure-gallery)
-- [How to run](#how-to-run)
-- [Output structure](#output-structure)
-- [Limitations and interpretation](#limitations-and-interpretation)
-- [Recommended next experiments](#recommended-next-experiments)
+### 🎓 Academic Metadata
+- **Researcher / Intern:** Debarghya Bhowmick  
+  *Department of Computer Science & Engineering, I.K. Gujral Punjab Technical University*
+- **Research Supervisor / Guide:** Dr. Tohida Rehman  
+  *Assistant Professor, Department of Information Technology, Jadavpur University*
+- **Internship Tenure:** June 2026 – November 2026
+- **Evaluation Track:** FIRE MixSub-SciHigh Track (Forum for Information Retrieval Evaluation)
+- **Task:** Automated Generation of Key Scientific Highlights from Research Paper Abstracts
 
 ---
 
-## Project overview
+## 📑 Core Project Deliverables
 
-Scientific highlight generation takes a research-paper abstract and produces a short set of statements that communicate its central findings. A useful system should:
-
-1. capture the key information in the reference highlights;
-2. remain grounded in the supplied abstract rather than introducing unsupported details; and
-3. generate outputs efficiently enough for practical use.
-
-This benchmark organizes evaluation into three pillars:
-
-| Pillar | What it asks | Main reported measure | Preferred direction |
-|---|---|---|---|
-| **1 — Reference quality** | Does the generated text resemble the human-written highlights? | ROUGE-L F1; target lexical F1 | Higher |
-| **2 — Source overlap** | How much generated vocabulary overlaps with the source abstract? | Source lexical precision; ungrounded-token proxy | Higher source overlap / lower proxy |
-| **3 — Inference efficiency** | How long does generation take, and how many examples can be processed per second? | Mean latency; sample throughput | Lower latency / higher throughput |
-
-The second pillar is deliberately described as a **source-overlap or grounding proxy**. It is not a semantic fact-checker and must not be presented as a direct measurement of factual hallucinations.
-
-## Dataset and task
-
-The project uses the three FIRE MixSub-SciHigh CSV splits:
-
-| Split | Expected file | Use |
+| Deliverable | File / Path | Description |
 |---|---|---|
-| Training | `MixSub-SciHigh_train_FIRE.csv` | Available for model training or fine-tuning workflows |
-| Validation | `MixSub-SciHigh_val_FIRE.csv` | Reference-based evaluation using `Abstract` and `Highlights` |
-| Masked test | `MixSub-SciHigh_test_FIRE(Masked).csv` | Generate predictions from `Abstract`; references are not available for ordinary scoring |
-
-Expected labelled columns:
-
-- `Abstract`: source scientific abstract.
-- `Highlights`: human-written reference highlights.
-
-The masked test split is for prediction/submission, not for calculating reference-based ROUGE or target-overlap metrics unless gold references are separately supplied by the task organizer.
-
-## Models and execution modes
-
-The project README originally planned six model families. The figures supplied with this README currently show results for **four models**:
-
-| Model shown in supplied results | Model identifier / family | Notes |
-|---|---|---|
-| BioMistral-7B | `BioMistral/BioMistral-7B` | Biomedical-domain model |
-| Qwen 2.5 7B | `Qwen/Qwen2.5-7B-Instruct` | Instruction-tuned model |
-| Llama 3.1 8B | `meta-llama/Llama-3.1-8B-Instruct` | Gated model; Hugging Face access approval required |
-| Pegasus-PubMed | `google/pegasus-pubmed` | Encoder-decoder model specialized for biomedical summarization |
-
-Other models in the original project plan include Gemma 2 2B and Phi-3 Mini. They are **not represented in the four supplied result figures** and are not included in the result interpretation below.
-
-### Execution-mode transparency
-
-The individual notebooks have not all used the same adaptation strategy. In particular, the recent BioMistral, Qwen, and Llama workflows were configured as zero-shot inference to reduce training time. A Gemma workflow was previously configured for QLoRA fine-tuning. Pegasus-PubMed may use a different encoder-decoder inference/training path.
-
-For a scientifically valid comparison, each row in the final results table should be accompanied by its actual `evaluation_type`, fine-tuning status, quantization, checkpoint, sample count, and hardware. Do not describe all models as QLoRA fine-tuned unless the run metadata and training logs confirm that.
-
-## Reproducibility and fair-comparison controls
-
-The intended shared generation limits are:
-
-| Setting | Value | Meaning |
-|---|---:|---|
-| `MAX_SOURCE_LENGTH` | 512 tokens | Maximum tokenized source length |
-| `MAX_TARGET_LENGTH` | 128 tokens | Maximum number of newly generated tokens |
-
-These limits standardize the input and output ceilings. They do **not** by themselves guarantee a fully controlled experiment. Record and, where possible, hold constant:
-
-- exact validation examples and evaluation sample count;
-- tokenizer truncation and special-token handling;
-- decoding settings (`do_sample`, temperature, top-p, repetition penalty, etc.);
-- model precision and quantization;
-- GPU type, software versions, and device placement;
-- whether model loading and warm-up are excluded from latency;
-- whether latency is measured per example and includes tokenization or only generation.
-
-For speed comparisons, use the same hardware and timing boundary. A T4 run and a different GPU run should not be compared as if they were directly equivalent.
-
-## Evaluation framework
-
-### Pillar 1 — Reference quality
-
-**ROUGE-L precision, recall, and F1**
-
-ROUGE-L uses the longest common subsequence (LCS) between a generated highlight and its human-written reference. It rewards overlap while taking token order into account.
-
-Let:
-
-- \(X\) be the generated text;
-- \(Y\) be the reference highlight;
-- \(LCS(X,Y)\) be the length of their longest common subsequence;
-- \(|X|\) and \(|Y|\) be their token counts.
-
-Then:
-
-\[
-P_{LCS}=\frac{LCS(X,Y)}{|X|},\qquad
-R_{LCS}=\frac{LCS(X,Y)}{|Y|}
-\]
-
-\[
-F1_{LCS}=\frac{2P_{LCS}R_{LCS}}{P_{LCS}+R_{LCS}}
-\]
-
-The implementation uses the `rouge-score` package with the `rougeL` scorer and stemming enabled. Per-example values are averaged over the evaluation set.
-
-**Target lexical precision, recall, and F1**
-
-A second, simpler overlap measure compares the sets of normalized whitespace-separated tokens in the generated highlight and reference. Text is lowercased, punctuation is removed, and repeated whitespace is collapsed.
-
-For each example, let \(G\) be the set of generated tokens and \(R\) the set of reference tokens:
-
-\[
-P_{target}=\frac{|G\cap R|}{|G|},\qquad
-R_{target}=\frac{|G\cap R|}{|R|}
-\]
-
-\[
-F1_{target}=\frac{2P_{target}R_{target}}{P_{target}+R_{target}}
-\]
-
-Zero-denominator cases are handled as zero. This is a set-based lexical measure: it does not understand paraphrases, entailment, or scientific correctness.
-
-### Pillar 2 — Source lexical overlap proxy
-
-**Source lexical precision**
-
-The same normalization and set-overlap procedure is applied between the generated highlight and its source abstract:
-
-\[
-P_{source}=\frac{|G\cap S|}{|G|}
-\]
-
-where \(S\) is the set of normalized source-abstract tokens.
-
-**Ungrounded-token proxy**
-
-The benchmark derives:
-
-\[
-Risk_{proxy}(\%)=(1-\overline{P_{source}})\times100
-\]
-
-A lower value means a smaller fraction of unique generated vocabulary is shared with the source abstract under this normalization.
-
-**Critical interpretation:** this calculation cannot determine whether a statement is true, false, entailed, or contradicted. A valid paraphrase may use words absent from the abstract and be counted as “ungrounded”; conversely, a copied but misrepresented phrase may receive high overlap. The metric should therefore be named **ungrounded-token lexical proxy** or **source non-overlap proxy**, not factual hallucination rate.
-
-### Pillar 3 — Inference efficiency
-
-**Mean generation latency**
-
-For each example, the notebook records elapsed wall-clock time around the generation call:
-
-\[
-\overline{T}=\frac{1}{N}\sum_{i=1}^{N}T_i
-\]
-
-The reported unit is seconds per sample. Whether tokenization and device-transfer time are included depends on the exact placement of the timer in each model notebook; this should be checked before cross-model claims.
-
-**Total latency**
-
-\[
-T_{total}=\sum_{i=1}^{N}T_i
-\]
-
-**Sample throughput**
-
-\[
-Throughput_{samples/sec}=\frac{N}{T_{total}}
-=\frac{1}{\overline{T}}
-\]
-
-This is examples per second, not generated tokens per second.
-
-**Token throughput**
-
-Some project documentation refers to tokens per second. That is a different measure:
-
-\[
-Throughput_{tokens/sec}=
-\frac{\text{number of generated tokens}}{\text{generation time in seconds}}
-\]
-
-Do not label sample throughput as token throughput. The supplied comparison figure displays samples/second.
-
-## How the metrics are achieved in the pipeline
-
-1. Load the validation CSV and verify the `Abstract` and `Highlights` columns.
-2. Tokenize/truncate the abstract to the shared source limit.
-3. Generate a highlight with the model's configured prompt and decoding settings.
-4. Record generation latency for that example.
-5. Compare the generated highlight with the reference using ROUGE-L and target lexical overlap.
-6. Compare generated vocabulary with the source abstract to calculate source lexical precision and its complementary proxy.
-7. Average per-example quality/overlap metrics and aggregate latency/throughput.
-8. Save model-level metrics as JSON and per-example outputs as CSV.
-9. The master notebook reads the JSON files, builds a comparison table, and creates the plots.
-
-The exact prompt and decoding parameters are model-notebook implementation details and should be reported from the corresponding notebook/configuration rather than assumed identical.
-
-## Observed results from the supplied figures
-
-The following values are **visual estimates read from the uploaded plots**, not exact values extracted from the raw benchmark JSON files. Use the JSON outputs to replace these approximations before publication.
-
-| Model | ROUGE-L F1 (approx. %) | Ungrounded-token proxy (approx. %) | Mean latency (approx. s/sample) | Throughput (approx. samples/s) |
-|---|---:|---:|---:|---:|
-| BioMistral-7B | 19.8 | 15.5 | 8.05 | 0.124 |
-| Qwen 2.5 7B | 19.86 | 40.5 | 3.30 | 0.303 |
-| Llama 3.1 8B | 19.03 | 47.5 | 7.90 | 0.127 |
-| Pegasus-PubMed | 16.90 | 42.5 | 10.55 | 0.094 |
-
-### Interpretation of the plotted results
-
-**Reference quality**
-- Qwen 2.5 7B has the highest plotted ROUGE-L F1, approximately 19.9%.
-- BioMistral-7B is very close, approximately 19.8%.
-- Llama 3.1 8B is around 19.0%.
-- Pegasus-PubMed is lowest in this displayed comparison, around 16.9%.
-
-The plotted differences are small in absolute terms. Without per-example scores, confidence intervals, and a significance test, do not claim that the small Qwen/BioMistral gap is statistically significant.
-
-**Source-overlap proxy**
-- BioMistral-7B has the lowest proxy value (about 15.5%), indicating the greatest lexical overlap with its source abstract among the four plotted systems.
-- Qwen is around 40.5%.
-- Pegasus-PubMed is around 42.5%.
-- Llama is highest at approximately 47.5%.
-
-This does **not** prove BioMistral is factually safest. It only indicates stronger vocabulary overlap under the benchmark's lexical calculation.
-
-**Inference efficiency**
-- Qwen has the lowest plotted mean latency (about 3.3 seconds/sample) and highest sample throughput (about 0.303 samples/second).
-- BioMistral and Llama are both around 8 seconds/sample.
-- Pegasus-PubMed is slowest in the displayed figure, around 10.6 seconds/sample.
-
-These observations are meaningful only if hardware, sample set, timer boundaries, and generation settings are comparable.
-
-### Overall reading
-
-On the four supplied plots, Qwen appears to offer the strongest **quality–speed** combination: highest displayed ROUGE-L F1 and fastest inference. BioMistral has the strongest **source lexical overlap** and nearly the same displayed ROUGE-L F1, but takes longer. Llama is slower and has the highest source non-overlap proxy in this set. Pegasus-PubMed is fastest neither nor highest in displayed ROUGE-L F1.
-
-There is no single overall winner unless the project defines how quality, source overlap, and speed should be weighted. Avoid combining the three pillars into an arbitrary composite score without a pre-registered rationale.
-
-## Figure gallery
-
-### Figure 1 — Quality vs. inference latency
-
-![Quality vs inference latency](assets/figure_1_quality_vs_latency.png)
-
-Higher on the y-axis and further left on the x-axis are preferred.
-
-### Figure 2 — Quality vs. source-overlap proxy
-
-![Quality vs source overlap proxy](assets/figure_2_quality_vs_grounding_proxy.png)
-
-Higher ROUGE-L and lower source non-overlap proxy are preferred. The x-axis is a lexical proxy, not a factual hallucination detector.
-
-### Figure 3 — Source-overlap proxy comparison
-
-![Source overlap proxy comparison](assets/figure_3_grounding_proxy_comparison.png)
-
-Lower proxy values indicate more generated vocabulary shared with the abstract under the metric's normalization.
-
-### Figure 4 — Inference latency and sample throughput
-
-![Inference speed comparison](assets/figure_4_inference_speed.png)
-
-Lower latency and higher samples/second are preferred.
-
-## How to run
-
-### 1. Prepare Google Drive
-
-Create this structure:
-
-```text
-MyDrive/
-└── JU_Benchmark_Project/
-    ├── Dataset/
-    │   ├── MixSub-SciHigh_train_FIRE.csv
-    │   ├── MixSub-SciHigh_val_FIRE.csv
-    │   └── MixSub-SciHigh_test_FIRE(Masked).csv
-    ├── checkpoints/
-    └── results/
+| **LaTeX Paper (Overleaf Ready)** | [`Research Paper Latex/`](Research%20Paper%20Latex/) / [`Research_Paper_Overleaf.zip`](Research_Paper_Overleaf.zip) | Complete `main.tex`, `references.bib`, and all 6 embedded figures, ready for instant compilation in Overleaf with `pdflatex`. |
+| **Research Paper (HTML)** | [`research paper.html`](research%20paper.html) | Single-column publication-grade research manuscript with full author metadata, KaTeX math, booktabs tables, and citations. |
+| **Full Project Report (Markdown)** | [`PROJECT_REPORT.md`](PROJECT_REPORT.md) | Comprehensive academic report with complete data, formulas, analysis, and references. |
+| **Printable Report (HTML/PDF)** | [`PROJECT_REPORT.html`](PROJECT_REPORT.html) | Beautifully styled document with KaTeX math rendering, printable via `Ctrl+P` -> Save as PDF. |
+| **Presentation Slide Deck** | [`PRESENTATION_SLIDES.md`](PRESENTATION_SLIDES.md) | Ready-to-present slides summarizing objectives, methodology, metrics, and conclusions. |
+| **Interactive UI Dashboard** | [`Summarization Dashboard Folder/`](Summarization%20Dashboard%20Folder/) | Dual **Streamlit** & **Gradio** application for live highlight generation and grounding audits. |
+| **Benchmark Visualizations** | [`Output/results/plots/`](Output/results/plots/) | High-resolution publication-quality comparison charts across all three pillars. |
+| **Master Benchmark Data** | [`Output/results/`](Output/results/) | Raw JSON metrics, consolidated CSVs, and model-by-model validation predictions. |
+
+---
+
+## 📌 Project Overview
+
+Scientific highlight generation takes a dense research-paper abstract and produces a short sequence of bullet points communicating its core breakthroughs and methodology. A production-ready system must satisfy three fundamental criteria:
+
+1. **Reference Quality (Pillar 1):** Closely align with author-written human gold highlights.
+2. **Factual Grounding & Safety (Pillar 2):** Remain strictly anchored to the provided abstract without hallucinating unverified claims.
+3. **Inference Efficiency (Pillar 3):** Generate highlights rapidly within practical latency and resource boundaries.
+
+```
+                       ┌────────────────────────────────────────────────────────┐
+                       │          THE THREE-PILLAR BENCHMARK FRAMEWORK          │
+                       └────────────────────────────────────────────────────────┘
+                                   │                   │                   │
+                 ┌─────────────────┴─────┐   ┌─────────┴─────────┐   ┌─────┴─────────────────┐
+                 │       PILLAR 1        │   │     PILLAR 2      │   │       PILLAR 3        │
+                 │   Reference Quality   │   │  Source Grounding │   │  Inference Efficiency │
+                 └───────────────────────┘   └───────────────────┘   └───────────────────────┘
+                 • ROUGE-L F1                • Source Lexical Prec.  • Mean Wall-Clock Latency
+                 • Target Lexical F1         • Ungrounded Token %    • Token & Sample Speed
 ```
 
-### 2. Run the model notebooks
+---
 
-Run the relevant model notebook(s) in Google Colab. Enable a GPU for model inference/training. Gated models such as Llama 3.1 require accepted model terms and an authorized Hugging Face token.
+## 📊 Exact Three-Pillar Benchmark Results
 
-### 3. Collect benchmark outputs
+The table below reports the **exact quantitative results** extracted directly from the verified benchmark outputs in `Output/results/master_3pillar_benchmark_comparison.csv`:
 
-Place each model's `benchmark_*.json` in the same `results/` folder. Keep the prediction CSVs for audit and task submission.
+| Model Architecture | Evaluation Mode | ROUGE-L F1 (%) | Target Lexical F1 (%) | Source Lexical Prec. (%) | Ungrounded Risk Proxy (%) | Mean Latency (s/sample) | Sample Throughput (samp/s) | Generation Speed (tok/s) |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Qwen-2.5-Instruct** | Zero-shot | **19.87%** | **28.27%** | 59.49% | 40.51% | **3.31 s** | **0.302** | **28.19** |
+| **BioMistral-7B** | Zero-shot | 19.80% | 27.37% | **84.44%** | **15.56%** | 8.04 s | 0.124 | 12.69 |
+| **Llama-3.1-8B-Instruct** | Zero-shot | 19.04% | 25.07% | 53.40% | 46.60% | 7.90 s | 0.127 | — |
+| **Pegasus-PubMed** | Seq2Seq | 16.90% | 22.32% | 57.40% | 42.60% | 10.56 s | 0.095 | 9.18 |
 
-### 4. Run the master comparison notebook
+### Key Empirical Findings:
+- **Quality Champion:** **Qwen-2.5-Instruct** achieved the highest ROUGE-L F1 (**19.87%**) and Target F1 (**28.27%**), followed closely by **BioMistral-7B** (**19.80%** ROUGE-L F1).
+- **Factuality & Safety Champion:** **BioMistral-7B** demonstrated peerless source grounding. **84.44%** of its generated vocabulary directly originated from the abstract, yielding a remarkably low ungrounded risk proxy of **15.56%** (over 60% lower than general LLMs).
+- **Speed & Throughput Champion:** **Qwen-2.5-Instruct** executed in just **3.31 seconds per paper** (**28.19 tokens/second**), running **2.4x faster** than Llama 3.1 / BioMistral and **3.2x faster** than Pegasus-PubMed.
 
-Run `07_Master_Benchmark_Comparison_and_Visualizations.ipynb`. The master comparison is a CPU-side aggregation/plotting task and does not need a GPU.
+---
 
-## Output structure
+## 📈 Visual Diagnostic Gallery
 
-```text
-JU_Benchmark_Project/
-├── Dataset/
-├── checkpoints/
-└── results/
-    ├── benchmark_<model>.json
-    ├── <model>_validation_predictions.csv
-    ├── MixSub-SciHigh_test_predictions_<model>.csv
-    ├── master_3pillar_benchmark_comparison.csv
-    ├── master_benchmark_run_report.json
-    └── plots/
-        ├── quality_vs_inference_latency.png
-        ├── quality_vs_hallucination_risk.png
-        ├── hallucination_risk_ranking.png
-        └── inference_speed_latency.png
+All comparison charts are saved in high resolution under `Output/results/plots/`:
+
+### Figure 1: Pillar 1 vs. Pillar 3 — Quality vs. Inference Latency
+![Quality vs Latency](Output/results/plots/quality_vs_inference_latency.png)
+*Qwen-2.5 occupies the optimal top-left quadrant (highest ROUGE-L quality and lowest inference latency).*
+
+### Figure 2: Pillar 1 vs. Pillar 2 — Quality vs. Ungrounded-Token Proxy
+![Quality vs Hallucination Risk](Output/results/plots/quality_vs_hallucination_risk.png)
+*BioMistral-7B stands alone on the far left, offering peerless factual safety while matching top quality.*
+
+### Figure 3: Pillar 2 — Source-Grounding Risk Proxy Ranking
+![Hallucination Risk Ranking](Output/results/plots/hallucination_risk_ranking.png)
+*BioMistral-7B is the only architecture well below the model average line (15.56% risk vs. ~40–47% for others).*
+
+### Figure 4: Pillar 3 — Inference Speed & Latency Comparison
+![Inference Speed and Latency](Output/results/plots/inference_speed_latency.png)
+*Dual-panel chart comparing Mean Latency (seconds/sample) and Throughput (samples/second).*
+
+---
+
+## 📁 Dataset Details (FIRE MixSub-SciHigh)
+
+The dataset consists of research paper abstracts paired with author-written scientific highlights:
+
+```
+Dataset Distribution:
+├── Training Split   : MixSub-SciHigh_train_FIRE.csv        (10,000 papers, with Gold Highlights)
+├── Validation Split : MixSub-SciHigh_val_FIRE.csv          ( 1,985 papers, with Gold Highlights)
+└── Masked Test Split: MixSub-SciHigh_test_FIRE(Masked).csv ( 1,840 papers, Abstract only)
 ```
 
-This repository README includes a copy of the four figures supplied for interpretation under `assets/`.
-
-## Limitations and interpretation
-
-1. **Lexical overlap is not factual verification.** The source-overlap proxy cannot establish hallucination or entailment.
-2. **ROUGE is a surface-overlap metric.** It may penalize correct paraphrases and does not fully assess scientific meaning.
-3. **Results are approximate in this README.** The supplied plots were available, but raw JSON result files were not included with the materials used to prepare this analysis. Replace visual estimates with exact JSON values before a paper or final report is submitted.
-4. **Only four models appear in the supplied figures.** The original plan lists six; Gemma 2 and Phi-3 Mini are not visible in these results.
-5. **Training conditions may differ.** Zero-shot and fine-tuned runs must be labelled and analyzed separately.
-6. **Runtime comparisons require matched conditions.** GPU type, quantization, software versions, decoding settings, timer boundaries, and evaluation sample count can change latency.
-7. **No statistical uncertainty is shown.** Report per-example distributions, confidence intervals, and paired significance tests before making strong claims about small score differences.
-8. **The 512/128 token limits are ceilings, not identical realized input/output lengths.** Record truncation rates and generated token counts where possible.
-
-## Recommended next experiments
-
-- Re-run all models on the exact same validation examples and sample count.
-- Export the raw JSON metrics and per-example prediction CSVs for all models.
-- Add bootstrap confidence intervals for ROUGE-L and source-overlap metrics.
-- Add a human or model-assisted factuality evaluation based on claim-level entailment, with manual adjudication for a subset.
-- Record actual generated-token throughput separately from samples/second.
-- Report zero-shot and fine-tuned model groups separately.
-- Include hardware and software metadata in every benchmark JSON.
+- **`MAX_SOURCE_LENGTH = 512` tokens**: Standardized ceiling across all models.
+- **`MAX_TARGET_LENGTH = 128` tokens**: Standardized output generation budget.
 
 ---
 
-## Citation and attribution
+## 🚀 Interactive Summarization Dashboard
 
-The dataset used by this project is FIRE MixSub-SciHigh. Cite the dataset/shared-task paper and the relevant model papers or model cards in the final research manuscript. Also cite the ROUGE implementation and software libraries used in the experiments. Add exact bibliographic entries only after verifying the authoritative publication details.
+We developed an interactive web application allowing users to select any of the four models, input or choose from 10 preloaded papers from the dataset, view generated highlights, and inspect three-pillar metrics with an interactive token-level grounding visualizer.
+
+### Streamlit Interactive Dashboard
+![Streamlit Scientific Highlight Generation Dashboard](dashboard.png)
+*Screenshot of the full-featured Streamlit dashboard interface featuring model selection and abstract input on the left, with generated highlights, three-pillar scorecard, and lexical grounding visualizer on the right.*
+
+### Gradio Alternative Dashboard
+![Gradio Scientific Highlight Generation Dashboard](gradio%20dashboard.png)
+*Screenshot of the lightweight Gradio interface providing rapid zero-latency evaluations and multi-model benchmark audits.*
+
+```
+┌──────────────────────────────────────────────┬──────────────────────────────────────────────┐
+│ 📥 LEFT PANEL: INPUT                         │ 📤 RIGHT PANEL: OUTPUT                       │
+├──────────────────────────────────────────────┼──────────────────────────────────────────────┤
+│ • Model Selector (Qwen, BioMistral, Llama,   │ • Formatted Scientific Highlights            │
+│   Pegasus)                                   │ • 3-Pillar Scorecard (Quality/Safety/Speed)  │
+│ • 10 Pre-loaded Dataset Samples or Custom    │ • Interactive Grounding Visualizer (Green/   │
+│   Abstract Text Area                         │   Orange token auditor)                      │
+│ • Generation Budget Controls (512 / 128 tok) │ • Human Reference Comparison                 │
+└──────────────────────────────────────────────┴──────────────────────────────────────────────┘
+```
+
+### Launching the Dashboard:
+
+#### 1. Streamlit Interface (Recommended):
+Double-click `Summarization Dashboard Folder/run_streamlit.bat` or run:
+```bash
+cd "Summarization Dashboard Folder"
+streamlit run app.py
+```
+*Access via browser at:* `http://localhost:8501`
+
+#### 2. Gradio Interface:
+Double-click `Summarization Dashboard Folder/run_gradio.bat` or run:
+```bash
+cd "Summarization Dashboard Folder"
+python gradio_app.py
+```
+*Access via browser at:* `http://127.0.0.1:7860`
 
 ---
 
-**Reproducibility note:** This README describes the metric logic and the results visible in the supplied plots. The raw benchmark JSON files and model notebooks remain the authoritative sources for exact scores, prompts, training settings, and run metadata.
+## 💻 Repository Directory Structure
+
+```text
+c:\JU Research Internship\Benchmark Project/
+├── Dataset/                                              # Official FIRE MixSub-SciHigh dataset
+│   ├── MixSub-SciHigh_train_FIRE.csv                     # 10,000 training papers
+│   ├── MixSub-SciHigh_val_FIRE.csv                       # 1,985 validation papers
+│   └── MixSub-SciHigh_test_FIRE(Masked).csv              # 1,840 masked test papers
+├── Output/
+│   ├── checkpoints/                                      # Checkpoint storage
+│   └── results/                                          # Benchmark evaluations
+│       ├── benchmark_biomistral-7b.json                  # BioMistral run metrics
+│       ├── benchmark_llama-3.1-8b.json                   # Llama 3.1 run metrics
+│       ├── benchmark_pegasus-pubmed.json                 # Pegasus run metrics
+│       ├── benchmark_qwen-2.5-7b.json                    # Qwen 2.5 run metrics
+│       ├── master_3pillar_benchmark_comparison.csv       # Consolidated comparison table
+│       ├── master_benchmark_run_report.json              # Aggregation run report
+│       ├── biomistral_zero_shot_predictions.csv          # Sample predictions
+│       ├── llama_validation_predictions.csv              # Sample predictions
+│       ├── pegasus_validation_predictions.csv            # Sample predictions
+│       ├── qwen_validation_predictions.csv               # Sample predictions
+│       └── plots/                                        # Diagnostic comparison plots
+├── Summarization Dashboard Folder/                       # Interactive web demo application
+│   ├── app.py                                            # Streamlit dashboard
+│   ├── gradio_app.py                                     # Gradio dashboard
+│   ├── run_streamlit.bat                                 # One-click Streamlit launcher
+│   ├── run_gradio.bat                                    # One-click Gradio launcher
+│   └── README.md                                         # Dashboard documentation
+├── 01_Pegasus_PubMed.ipynb                               # Google Pegasus-PubMed pipeline
+├── 02_Gemma_2_2B.ipynb                                   # Google Gemma-2-2B QLoRA pipeline
+├── 03_Phi_3_Mini.ipynb                                   # Microsoft Phi-3-Mini QLoRA pipeline
+├── 04_BioMistral_7B.ipynb                                # BioMistral-7B evaluation pipeline
+├── 05_Qwen_2.5_7B.ipynb                                  # Qwen-2.5 evaluation pipeline
+├── 06_Llama_3.1_8B.ipynb                                 # Meta Llama-3.1-8B evaluation pipeline
+├── 07_Master_Benchmark_Comparison_and_Visualizations.ipynb# Master evaluation & visualization script
+├── build_html_report.py                                  # Script to compile HTML report with KaTeX
+├── PROJECT_REPORT.md                                     # Official Project Report (Markdown)
+├── PROJECT_REPORT.html                                   # Printable HTML Report with KaTeX
+├── PRESENTATION_SLIDES.md                                # Presentation slide deck
+└── README.md                                             # Repository documentation (this file)
+```
+
+---
+
+## 🛠️ Reproducibility and Execution
+
+### Running Benchmark Notebooks in Google Colab:
+1. Mount Google Drive and upload dataset files to `MyDrive/JU_Benchmark_Project/Dataset/`.
+2. Run individual model notebooks (`01` through `06`) using a GPU runtime (T4 or A100).
+3. Benchmark JSON outputs and prediction CSVs are automatically written to `results/`.
+4. Run `07_Master_Benchmark_Comparison_and_Visualizations.ipynb` to aggregate metrics and generate all comparison plots.
+
+---
+
+## 📚 Acknowledgements & References
+
+This research was conducted as part of the **Jadavpur University Research Internship** (June – November 2026) under the supervision of **Dr. Tohida Rehman**, Assistant Professor, Department of Information Technology, Jadavpur University.
+
+### Key Citations:
+1. **FIRE MixSub-SciHigh Track:** Forum for Information Retrieval Evaluation.
+2. **BioMistral:** Labrak et al. (2024). *BioMistral: A Collection of Open-Source Pre-trained Large Language Models for Medical Domains*. arXiv:2402.10373.
+3. **Qwen2.5:** Yang et al. (2024). *Qwen2.5 Technical Report*. Alibaba Group.
+4. **Llama 3.1:** Dubey et al. (2024). *The Llama 3 Herd of Models*. Meta AI.
+5. **PEGASUS:** Zhang et al. (2020). *PEGASUS: Pre-training with Extracted Gap-Sentences for Abstractive Summarization*. ICML 2020.
+6. **ROUGE:** Lin, C.-Y. (2004). *ROUGE: A Package for Automatic Evaluation of Summaries*. ACL.

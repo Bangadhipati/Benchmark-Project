@@ -1,0 +1,17 @@
+{
+    "overall_quality_rougeL_f1": 0.19799272503790905,
+    "rougeL_precision": 0.18478586651927273,
+    "rougeL_recall": 0.2351502045291018,
+    "f1_score_target": 0.27369554447247907,
+    "precision_target": 0.25470842874028726,
+    "recall_target": 0.3263996485404107,
+    "hallucination_risk_pct": 0.15563858558782498,
+    "source_grounding_precision": 0.8443614144121752,
+    "wall_clock_latency_sec": 8.03912977170005,
+    "total_wall_clock_sec": 160.782595434001,
+    "throughput_tokens_per_sec": 12.69416005190563,
+    "model": "BioMistral/BioMistral-7B",
+    "fine_tuning": false,
+    "evaluation_samples": 20,
+    "evaluation_type": "Zero-shot"
+}

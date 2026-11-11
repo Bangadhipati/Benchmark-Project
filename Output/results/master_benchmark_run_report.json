@@ -1,0 +1,19 @@
+{
+    "benchmark_files_found": 4,
+    "valid_models_loaded": 4,
+    "failed_files": [],
+    "models": [
+        "BioMistral/BioMistral-7B",
+        "Llama-3.1-8B-Instruct",
+        "pegasus-pubmed",
+        "qwen-2.5-7b"
+    ],
+    "comparison_csv": "/content/drive/MyDrive/JU_Benchmark_Project/results/master_3pillar_benchmark_comparison.csv",
+    "plots_directory": "/content/drive/MyDrive/JU_Benchmark_Project/results/plots",
+    "generated_plots": [
+        "hallucination_risk_ranking.png",
+        "inference_speed_latency.png",
+        "quality_vs_hallucination_risk.png",
+        "quality_vs_inference_latency.png"
+    ]
+}

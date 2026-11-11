@@ -1,0 +1,22 @@
+{
+    "model": "Llama-3.1-8B-Instruct",
+    "fine_tuning": false,
+    "quantization": "4-bit NF4",
+    "evaluation_type": "zero-shot",
+    "max_source_length": 512,
+    "max_target_length": 128,
+    "metrics": {
+        "samples": 20,
+        "rougeL_precision": 0.2089413972273873,
+        "rougeL_recall": 0.1906839646911166,
+        "rougeL_f1": 0.19035739842033994,
+        "target_lexical_precision": 0.2585452273436771,
+        "target_lexical_recall": 0.25773266696693276,
+        "target_lexical_f1": 0.2507267439344283,
+        "source_lexical_precision": 0.5340145448534536,
+        "hallucination_risk_pct": 46.598545514654646,
+        "mean_latency_seconds": 7.898601377010346,
+        "total_latency_seconds": 157.9720275402069,
+        "throughput_samples_per_second": 0.12660469268782168
+    }
+}
